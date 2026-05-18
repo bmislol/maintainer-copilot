@@ -29,10 +29,12 @@ Access points (filled out fully by Phase 1.3):
 | Streamlit admin | http://localhost:8501 |
 | API + Swagger | http://localhost:8000/docs |
 | Demo host page (embed target) | http://localhost:8080 |
-| Widget bundle / loader | http://localhost:8000/widget.js |
+| Widget bundle | http://localhost:8081 |
 | Langfuse UI | http://localhost:3001 |
 | MinIO console | http://localhost:9001 |
 | Vault UI | http://localhost:8200 |
+| Postgres | localhost:5432 |
+| Redis | localhost:6379 |
 
 ## 2. Refuse-to-Boot Checks
 
@@ -118,6 +120,8 @@ After a reset, re-run the first-time startup (Section 1) and the admin bootstrap
 ## 7. Common Issues
 
 Filled as the project grows. Reserved slots:
+
+- Port collisions on first boot. If docker compose up fails with address already in use, find what's holding the port with sudo lsof -i :<port> and either stop the conflicting process or change the matching *_PORT in .env. The common offenders are 5432 (system Postgres) and 6379 (system Redis).
 
 - Langfuse first-boot signup (create the org and project; copy keys into Vault).
 - Postgres pgvector extension creation on first migration.

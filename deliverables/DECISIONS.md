@@ -122,7 +122,7 @@ The classification-baseline DECISIONS entry compares classical ML, fine-tuned tr
 
 ---
 
-## D-004: Tracing Backend — Langfuse (Self-Hosted)
+## D-004: Tracing Backend — Langfuse v2 (Self-Hosted)
 
 Status: Accepted
 Date: 2026-05-18
@@ -131,8 +131,9 @@ Date: 2026-05-18
 
 The brief requires picking a tracing backend and defending the choice. Every LLM call, tool call, and RAG retrieval must appear as a span, and a conversation must be a trace tree rooted at the user message. The Friday demo walks through a real trace tree including one error path.
 
-### Recommendation
-Use Langfuse, self-hosted in the project's compose stack.
+### Decision
+
+Use **Langfuse v2**, self-hosted in the project's compose stack. Pinned via `image: langfuse/langfuse:2` — not `:latest`.
 
 ### Why
 
@@ -141,15 +142,24 @@ Use Langfuse, self-hosted in the project's compose stack.
 - First-class Python SDK with explicit spans for LLM calls, tool calls, and arbitrary nested operations.
 - No external dependency for the Friday demo.
 
+### Why v2 specifically, not v3
+
+Langfuse v3 introduced ClickHouse as a required backing store on top of Postgres + Redis + MinIO. For a single-developer, single-machine project this multiplies the compose footprint (extra service, extra volume, extra healthcheck, extra failure mode) without any functional benefit — both v2 and v3 expose the same trace-tree UI and the same SDK surface for our use cases (LLM call spans, tool call spans, error paths, conversation tree). v2 only needs the Postgres we already have.
+
+Pinning to the `:2` major guards against the same surprise happening again if the team upgrades the `:latest` tag.
+
 ### Alternatives Considered
 
-- LangSmith — cloud-only, paid past the free tier, ties demo reliability to a third-party service.
-- Arize Phoenix — similar self-hostable model; Langfuse picked for richer LLM-conversation-shaped trace UI.
-- OpenTelemetry + Jaeger — more generic, more setup, less LLM-aware out of the box.
+- **Langfuse v3** — rejected per above (ClickHouse footprint not justified for this project).
+- **LangSmith** — cloud-only, paid past the free tier, ties demo reliability to a third-party service.
+- **Arize Phoenix** — similar self-hostable model; Langfuse picked for richer LLM-conversation-shaped trace UI.
+- **OpenTelemetry + Jaeger** — more generic, more setup, less LLM-aware out of the box.
 
 ### Trade-offs
 
-Adds one more service to compose and one more startup dependency. Refuse-to-boot logic covers the misconfigured case.
+- Adds one more service to compose and one more startup dependency. The api-level refuse-to-boot logic (Phase 1.5) covers the misconfigured case.
+- The Docker container-level healthcheck for langfuse is **disabled** — the v2 image's networking made every reasonable healthcheck probe (`wget`, `curl`, `node http.get`) fail despite the app being fully responsive in the browser and via curl from the host. Since no other service `depends_on: langfuse` (langfuse is a write-only sink, not a dependency), the missing healthcheck has no operational impact on the boot graph. Service health is instead verified by the Langfuse SDK at api startup (Phase 1.5) — if the SDK can't connect, api refuses to boot. This means the *real* health check happens at the consumer (api), not at the producer (langfuse container), which is arguably more correct anyway.
+- Running on `:2` means we accept whatever maintenance posture Langfuse gives to the v2 line. For a 5-day project this is irrelevant; for a long-lived deployment it would be a decision to revisit.
 
 ---
 

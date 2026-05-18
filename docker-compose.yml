@@ -1,0 +1,199 @@
+# Maintainer's Copilot — full stack
+# Boot order is enforced via depends_on with service_healthy conditions.
+
+name: maintainer-copilot
+
+services:
+
+  # ─── Infrastructure ──────────────────────────────────────────────
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: copilot
+      POSTGRES_PASSWORD: copilot-dev-password
+      POSTGRES_DB: copilot
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U copilot -d copilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  vault:
+    image: hashicorp/vault:1.18
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-dev-only-root-token}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8200/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://copilot:copilot-dev-password@db:5432/copilot
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3001}
+      NEXTAUTH_SECRET: langfuse-dev-secret-change-me-32-chars-min
+      SALT: langfuse-dev-salt-change-me-too
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_INIT_ORG_ID: copilot-dev
+      LANGFUSE_INIT_ORG_NAME: "Copilot Dev"
+      LANGFUSE_INIT_PROJECT_ID: maintainer-copilot
+      LANGFUSE_INIT_PROJECT_NAME: "Maintainer's Copilot"
+      LANGFUSE_INIT_USER_EMAIL: admin@copilot.local
+      LANGFUSE_INIT_USER_NAME: "Admin"
+      LANGFUSE_INIT_USER_PASSWORD: copilot-dev-langfuse-pw
+    ports:
+      - "${LANGFUSE_PORT:-3001}:3000"
+
+  # ─── Application ─────────────────────────────────────────────────
+
+  migrate:
+    # Alembic runs migrations and exits. Lands real content in Phase 1.4.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-c", "print('migrate stub — Alembic lands in Phase 1.4')"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      VAULT_ADDR: ${VAULT_ADDR:-http://vault:8200}
+      VAULT_TOKEN: ${VAULT_TOKEN:-dev-only-root-token}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  modelserver:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uvicorn", "app.modelserver:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      VAULT_ADDR: ${VAULT_ADDR:-http://vault:8200}
+      VAULT_TOKEN: ${VAULT_TOKEN:-dev-only-root-token}
+    depends_on:
+      vault:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8001/healthz').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  chatbot:
+    build:
+      context: ./frontend-admin
+      dockerfile: Dockerfile
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "${ADMIN_PORT:-8501}:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8501/_stcore/health').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  widget:
+    build:
+      context: ./frontend-widget
+      dockerfile: Dockerfile
+    ports:
+      - "${WIDGET_PORT:-8081}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  host:
+    build:
+      context: ./demo/host
+      dockerfile: Dockerfile
+    ports:
+      - "${HOST_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  db-data:
+  redis-data:
+  minio-data:
