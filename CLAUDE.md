@@ -97,7 +97,7 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 ### Section 1 — Foundations (Monday) · 6 phases
 
-#### [x] Phase 1.1 · Repo skeleton + Git setup ✅
+#### Phase 1.1 · Repo skeleton + Git setup
 
 - Create folder layout per §4.
 - `.gitignore`, conventional-commit guide, PR template.
@@ -106,7 +106,9 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** none yet — structure only.
 
-#### [x] Phase 1.2 · Python tooling + first CI ✅
+- [x] Phase 1.1 - done
+
+#### Phase 1.2 · Python tooling + first CI 
 
 - `uv` initialised. `pyproject.toml` for `backend/` (api), `backend/` (modelserver shares deps), and `frontend-admin/`.
 - Dev deps: `ruff`, `mypy`, `pytest`, `pytest-asyncio`.
@@ -116,7 +118,9 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** none.
 
-#### [] Phase 1.3 · docker-compose skeleton (every service stubbed)
+- [x] Phase 1.2 - done
+
+#### Phase 1.3 · docker-compose skeleton (every service stubbed)
 
 - `docker-compose.yml` declares: `api`, `modelserver`, `chatbot`, `widget`, `host`, `migrate`, `db`, `redis`, `minio`, `vault`, `langfuse`, plus init containers (`vault-init`, `minio-init`).
 - Every service has a working Dockerfile and a `/healthz` endpoint returning 200 (FastAPI services) or a static page (host).
@@ -124,7 +128,9 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/RUNBOOK.md` §1 (access points + startup order), `deliverables/ARCH.md` §2 (services table — confirm ports).
 
-#### [] Phase 1.4 · Vault + Alembic baseline
+- [x] Phase 1.3 - done
+
+#### Phase 1.4 · Vault + Alembic baseline
 
 - `app/infra/vault.py` with `load_secrets()` called from API lifespan startup.
 - `vault-init` seeds dev secrets into KV v2 per `deliverables/SECURITY.md` §3.
@@ -134,7 +140,7 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/SECURITY.md` §3, §9 (refuse-to-boot), `deliverables/ARCH.md` §9.
 
-#### [] Phase 1.5 · Langfuse + structured logging
+#### Phase 1.5 · Langfuse + structured logging
 
 - `app/infra/tracing.py` wraps the Langfuse SDK.
 - `langfuse` service in compose with first-boot signup, project + keys created, keys written into Vault by `vault-init`.
@@ -143,7 +149,7 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/ARCH.md` §12 (logging + tracing).
 
-#### [] Phase 1.6 · Dataset fetch + splits
+#### Phase 1.6 · Dataset fetch + splits
 
 - `scripts/fetch_issues.py` pulls closed issues from `tiangolo/fastapi` via the GitHub API. Caches raw JSON to `backend/data/issues/raw/` (gitignored).
 - `scripts/build_dataset.py` normalises issues → JSONL, applies the label → class mapping (defended in DECISIONS D-007).
