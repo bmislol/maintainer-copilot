@@ -1,0 +1,82 @@
+# ─── Python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+
+# ─── Virtual environments ───────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ─── uv (lock and .python-version ARE committed) ───────────────────
+# uv.lock         <- committed
+# .python-version <- committed
+
+# ─── Test / lint / type-check caches ───────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ─── Jupyter ────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── Environment / secrets ─────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+# .env.example  <- committed
+
+# ─── Node / Vite (frontend-widget) ─────────────────────────────────
+node_modules/
+frontend-widget/dist/
+frontend-widget/.vite/
+.npm/
+.yarn/
+yarn-error.log
+npm-debug.log*
+
+# ─── Streamlit ──────────────────────────────────────────────────────
+.streamlit/secrets.toml
+
+# ─── Model weights live in MinIO, not Git ──────────────────────────
+backend/app/classifier/models/*.pt
+backend/app/classifier/models/*.pth
+backend/app/classifier/models/*.safetensors
+backend/app/classifier/models/*.bin
+*.onnx
+
+# ─── Dataset cache ──────────────────────────────────────────────────
+backend/data/
+
+# ─── Eval reports go to MinIO ──────────────────────────────────────
+eval_reports/
+*.eval.json
+
+# ─── Logs ───────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Docker local overrides ────────────────────────────────────────
+docker-compose.override.yml
+
+# ─── IDE / editors ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
