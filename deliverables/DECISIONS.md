@@ -317,6 +317,70 @@ The `question` class is overrepresented in val (98 / 576 ≈ 17%) and test (66 /
 - Test-set per-class F1 will have moderate variance due to small per-class counts (smallest class in test: `question` at 66; smallest classified class in test: `feature` at 89).
 - Models that fail to generalize across temporal label drift will be penalized. This is desired — it tests robustness, not memorization.
 
+## D-009: Fine-Tuned Classifier — Backbone, Hyperparameters, Freeze Policy
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+The brief requires fine-tuning a small encoder for classification, with a model card listing architecture, hyperparameters, freeze policy, training data hash, and final metrics. Phase 2.1 produces that artifact.
+
+### Decision
+
+Backbone: `distilbert-base-uncased` (HuggingFace).
+
+Freeze policy: **full fine-tune** — no layers frozen. Standard practice for text encoders on small classification tasks; the 66M parameter model is small enough that full fine-tuning doesn't risk catastrophic forgetting on a 4-class downstream task.
+
+Hyperparameters (frozen and recorded in `model_card.json`):
+
+| Parameter | Value |
+|---|---|
+| max_length | 256 |
+| num_train_epochs | 4 |
+| per_device_train_batch_size | 16 |
+| per_device_eval_batch_size | 32 |
+| learning_rate | 2e-5 |
+| weight_decay | 0.01 |
+| warmup_ratio | 0.1 |
+| early_stopping_patience | 1 |
+| class_weights | balanced (1/class_frequency normalized) |
+| fp16 | True (CUDA available) |
+| seed | 42 |
+
+Early stopping on `val_macro_f1` with patience 1 ended training after epoch 2 — val metric peaked at epoch 1 and dropped at epoch 2 (overfitting onset). Best checkpoint restored.
+
+### Why these choices
+
+- `distilbert-base-uncased`: matches the instructor's chapter-7 fine-tuning curriculum (Notebook 7), making the engineering legible to anyone familiar with the course. 66M params; trains in ~40s on RTX 3060.
+- Full fine-tune (not partial-unfreeze): partial freezing makes sense for vision tasks where the early conv layers transfer well, but text encoders rarely see this benefit on small datasets; full fine-tune is the simpler, more reliable default.
+- Class weights: balanced loss compensates for the 5.2:1 imbalance between `bug` and `question`. Without weights, the model would over-predict `bug`.
+- Learning rate 2e-5: HuggingFace default for BERT-family fine-tuning. Adjusting this without evidence wouldn't help on ~2700 examples.
+- `early_stopping_patience=1`: aggressive on a small dataset — we expect overfitting to start fast.
+- `seed=42`: reproducibility. Each retrain produces nearly identical numbers (validated empirically — 3 runs within 0.02 macro-F1 of each other).
+
+### Threshold — modelserver refuse-to-boot
+
+Committed: `test_macro_f1 >= 0.60`. Shipping model is at 0.7462 — 14 points of headroom.
+
+Rationale: 0.60 is below the model's actual performance but above the "random three-class baseline" (~0.33 for balanced 4-class) by a wide margin. A model that drifts below 0.60 should not be shipped — either retraining went wrong or the dataset changed in a way that broke the classifier.
+
+### Quantified outcome (Phase 2.1)
+
+- Training time: 43.4 seconds on RTX 3060 Laptop GPU
+- Test accuracy: 0.8478
+- Test macro-F1: 0.7462
+- Per-class F1: bug 0.9255 / feature 0.8148 / docs 0.8845 / question 0.3600
+- W&B run: https://wandb.ai/bmislol-se-factory/maintainer-copilot/runs/6vaoq2zd
+- classifier.pt SHA-256: a3bd4cb8f9328ce409169d14ef4585c27f1149ff2c69795de0e8e5759a8f3a59
+- training_data SHA-256: 1a4e887a580b5289d4b87fcff2890235c95945d78cd768f3e25933b3ca4c3959
+
+### Trade-offs
+
+- The `question` class F1 (0.36) is much weaker than the others. This is expected — the class label is partially synthesized from `Needs Triage` and `help wanted` (D-007) which are noisy. We accept this and let Phase 2.3's LLM baseline cover the gap.
+- CPU inference in production (modelserver doesn't have GPU passthrough). Latency p50 expected ~30-100ms per inference on 256-token input. Phase 2.4 measures and confirms.
+- Artifact storage in /tmp inside the container. Each restart re-downloads from MinIO (~270MB, ~5 seconds inside the docker network). Acceptable for a 5-day project; a persistent volume would eliminate the round-trip cost in production.
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -558,7 +622,6 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 
 Filled in as phases land. Reserved slots:
 
-- **D-009 — Fine-tuned classifier backbone, hyperparameters, and freeze policy.** Filled by Phase 2.1.
 - **D-010 — Classical ML baseline pipeline.** Filled by Phase 2.2.
 - **D-011 — LLM classification baseline (prompt, structured output strategy, latency/cost budget).** Filled by Phase 2.3.
 - **D-012 — Three-way classifier comparison and deployment choice.** Filled by Phase 2.3.

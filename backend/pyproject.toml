@@ -15,6 +15,18 @@ dependencies = [
     "psycopg2-binary>=2.9.10",              # Sync driver — Alembic prefers this for migrations
     "pgvector>=0.3.6",                      # pgvector type bindings
     "langfuse>=2.50.0,<3.0.0",
+
+    # ─── ML / training stack ──────────────────────────────────────
+    "torch>=2.4.0",
+    "transformers>=4.46.0",
+    "accelerate>=1.1.0",
+    "datasets>=3.1.0",
+    "evaluate>=0.4.3",
+    "scikit-learn>=1.5.0",
+    "wandb>=0.18.0",
+
+    # ─── Object storage client (for modelserver to fetch artifacts) ──
+    "minio>=7.2.0",
 ]
 
 [dependency-groups]
@@ -25,7 +37,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.27.0",
     "types-hvac>=2.4.0.20260518",
-    "tqdm>=4.66.0",   # progress bar for the fetch script
+    "tqdm>=4.66.0",
+    "nbformat>=5.10.0",
+    "ipykernel>=7.0.0",
 ]
 
 # ─── ruff ──────────────────────────────────────────────────────────
@@ -75,6 +89,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
   module = ["langfuse.*"]
+  ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+  module = ["minio.*"]
   ignore_missing_imports = true
 
 # ─── pytest ────────────────────────────────────────────────────────

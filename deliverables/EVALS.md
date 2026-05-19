@@ -4,7 +4,19 @@ Last updated: 2026-05-18
 
 Two golden eval suites gate CI. Thresholds live in `eval_thresholds.yaml` at the repo root. A regression below threshold blocks merge. Every run writes an `eval_report.json` to MinIO and is diffed against the previous green build.
 
-## 1. Classification Eval
+### 1. Classification (Phase 2.1)
+
+| Backbone | distilbert-base-uncased |
+| Training set hash | 1a4e887a580b5289d4b87fcff2890235c95945d78cd768f3e25933b3ca4c3959 |
+| Train / Val / Test | 2690 / 576 / 578 (time-based split, see D-008) |
+| Test accuracy | 0.8478 |
+| Test macro-F1 | 0.7462 |
+| Per-class F1 | bug 0.9255 / feature 0.8148 / docs 0.8845 / question 0.3600 |
+| Latency p50 (CPU, 256 tokens) | TBD — measure in Phase 2.4 |
+
+**Threshold:** modelserver refuses to boot if `test_macro_f1 < 0.60`. Committed value 0.60 defended in D-009.
+
+**Per-class outliers.** `question` at F1 0.36 reflects the noisy proxy labeling defined in D-007 (`Needs Triage` + `help wanted` mapped to `question`). The fine-tuned model struggles with the class as expected. Phase 2.3's LLM baseline is the comparison point — Claude is expected to outperform on this class.
 
 ### 1.1 Golden Set
 
