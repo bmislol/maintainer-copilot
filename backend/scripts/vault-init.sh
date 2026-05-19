@@ -37,8 +37,8 @@ vault kv put "secret/${PREFIX}/anthropic" \
     api_key="${ANTHROPIC_API_KEY:-sk-ant-dev-placeholder-replace-in-vault}"
 
 vault kv put "secret/${PREFIX}/langfuse" \
-    public_key="pk-lf-dev-placeholder" \
-    secret_key="sk-lf-dev-placeholder" \
+    public_key="${LANGFUSE_PUBLIC_KEY:-pk-lf-dev-placeholder}" \
+    secret_key="${LANGFUSE_SECRET_KEY:-sk-lf-dev-placeholder}" \
     host="http://langfuse:3000"
 
 echo "vault-init: seeding complete"

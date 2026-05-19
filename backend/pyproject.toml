@@ -14,6 +14,7 @@ dependencies = [
     "alembic>=1.14.0",                      # Migrations
     "psycopg2-binary>=2.9.10",              # Sync driver — Alembic prefers this for migrations
     "pgvector>=0.3.6",                      # pgvector type bindings
+    "langfuse>=2.50.0,<3.0.0",
 ]
 
 [dependency-groups]
@@ -70,6 +71,10 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["pgvector.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+  module = ["langfuse.*"]
+  ignore_missing_imports = true
 
 # ─── pytest ────────────────────────────────────────────────────────
 [tool.pytest.ini_options]

@@ -390,6 +390,67 @@ The `migrate` container inside docker has no `DATABASE_URL` set, so it goes thro
 
 Small dual code path in `alembic/env.py`. The override is one `if/else`, well-commented for the Friday review.
 
+## D-031: Structured JSON Logging with ContextVar-Bound IDs
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+Phase 1.5 wires Langfuse tracing. To make traces actually useful for debugging, every log line emitted during a request must carry the request's `trace_id` and `request_id` so logs and traces can be cross-referenced. Plain key/value log formats and the default uvicorn logger don't carry these by default.
+
+### Decision
+
+A single `JSONFormatter` in `app/core/logging.py` emits every log line as one line of JSON with seven fixed fields: `timestamp`, `level`, `service`, `event`, `message`, `request_id`, `trace_id`. The IDs flow through Python `contextvars` (`request_id_var`, `trace_id_var`), bound by `RequestContextMiddleware` at the start of each request and reset at the end.
+
+A `HealthzFilter` on the uvicorn access logger suppresses the `GET /healthz` noise that would otherwise flood logs at 1 hit per 5 seconds.
+
+### Why
+
+- `contextvars` flow IDs through every nested function call, including `await` boundaries, without manual plumbing. Every log call inside a request picks them up automatically.
+- One JSON line per record makes the logs grep-able and ingestable by any structured log aggregator.
+- The same formatter is shared by `api` and `modelserver` — `configure_logging(service_name=...)` is the single entry point.
+
+### Alternatives Considered
+
+- Plain text logging with `request_id` passed explicitly through function arguments. Rejected — every function would need an extra parameter, and any forgotten call site loses correlation.
+- `structlog`. More featureful, more dependencies; not needed at this scale.
+- Pass `request_id` via a `Request` attribute and pull it inside handlers. Doesn't help library code (e.g. SQLAlchemy queries) that doesn't see the Request.
+
+### Trade-offs
+
+`contextvars` have a small per-set overhead and require resetting in a `finally` block. Acceptable. The healthcheck filter is a heuristic — if other endpoints get added that match `/healthz` substring, they'd be silenced too. We'd notice immediately because all logs go through the same formatter.
+
+---
+
+## D-032: Langfuse Health Check via `auth_check()` at Startup
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+The brief requires api to refuse to boot if Langfuse is misconfigured. Two interpretations: check that secrets exist in Vault (cheap, weak), or check that the SDK can actually reach Langfuse and authenticate (slightly more expensive, strong).
+
+### Decision
+
+`app/infra/tracing.py::init_langfuse()` constructs the SDK client and immediately calls `client.auth_check()`. This makes a real HTTP request to Langfuse's `/api/public/projects` endpoint with the configured keys. If the call raises (network) or returns `False` (invalid credentials), `LangfuseUnreachableError` is raised and the lifespan refuses to boot.
+
+### Why
+
+- The keys-exist check is meaningless — keys can exist in Vault but be wrong, stale, or for a deleted project. We've already hit this scenario during Phase 1.5 setup, when placeholder keys were seeded before the real ones were generated.
+- `auth_check()` is the v2 SDK's documented way to verify connectivity and credentials in one call.
+- It runs once at startup, so the overhead is one HTTP round trip per process restart. Negligible.
+
+### Alternatives Considered
+
+- Skip the check entirely; let the first real trace fail at runtime. Rejected — failures at request time produce 500s and trigger user-visible errors; failures at startup are obvious in `docker compose ps -a`.
+- Periodically re-check at runtime. Out of scope for a 5-day project; the brief grades startup correctness, not runtime liveness probing.
+
+### Trade-offs
+
+If Langfuse is temporarily unreachable during a deploy/restart, api will refuse to boot until Langfuse is reachable. Acceptable for this project — Langfuse is in the same compose stack. In production with external Langfuse, the trade-off would be revisited.
+
 ## Pending Decisions
 
 Filled in as phases land. Reserved slots:

@@ -151,6 +151,8 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/ARCH.md` §12 (logging + tracing).
 
+- [x] Phase 1.5 - done
+
 #### Phase 1.6 · Dataset fetch + splits
 
 - `scripts/fetch_issues.py` pulls closed issues from `tiangolo/fastapi` via the GitHub API. Caches raw JSON to `backend/data/issues/raw/` (gitignored).
