@@ -79,6 +79,8 @@ services:
       VAULT_TOKEN: ${VAULT_TOKEN:-dev-only-root-token}
       VAULT_KV_PATH_PREFIX: ${VAULT_KV_PATH_PREFIX:-maintainer-copilot}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-sk-ant-dev-placeholder-replace-in-vault}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-dev-placeholder}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-dev-placeholder}
     volumes:
       - ./backend/scripts/vault-init.sh:/usr/local/bin/vault-init.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/vault-init.sh"]

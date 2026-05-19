@@ -180,9 +180,9 @@ The compose boot sequence is:
 
 The `api` refuses to boot if any of the following are true:
 
-- Vault is unreachable.
-- The Langfuse tracing backend is misconfigured.
-- Any committed eval threshold in `eval_thresholds.yaml` is set to zero or disabled.
+- Vault is unreachable. *(implemented in Phase 1.4)*
+- The Langfuse tracing backend is unreachable or rejects credentials. *(implemented in Phase 1.5)*
+- Any committed eval threshold in `eval_thresholds.yaml` is set to zero or disabled. *(Phase 2.4)*
 
 The `modelserver` refuses to boot if:
 
@@ -224,31 +224,35 @@ backend/app/eval/classification/run_eval.py
 
 ### 12.1 Tracing
 
-Backend: Langfuse, self-hosted in the compose stack.
+Backend: Langfuse v2, self-hosted in the compose stack.
 
-Every LLM call, tool call, and RAG retrieval is a span. A conversation is a trace tree rooted at the user message. Span attributes include model name, token counts, latency, and tool inputs/outputs **after redaction**. The trace ID is logged on every structured log line for the same request, so logs and traces are joinable.
+At api startup, `app/infra/tracing.py::init_langfuse(secrets.langfuse)` initializes the SDK and calls `auth_check()` to verify connectivity. If that fails (network error or invalid credentials), api refuses to boot.
+
+A single Langfuse trace is started for every HTTP request by `RequestContextMiddleware`, rooted at the user's request. In later phases, every LLM call, tool call, and RAG retrieval will be a child span of this trace. Span attributes include model name, token counts, latency, and tool inputs/outputs **after redaction** (redaction layer lands in Phase 3.5).
 
 ### 12.2 Logging
 
-All services log structured JSON. Minimum fields:
+All services emit structured JSON via `app/core/logging.py::JSONFormatter`. Fields on every log line:
 
 ```json
 {
-  "timestamp": "ISO-8601",
-  "level": "info",
-  "service": "api | modelserver | chatbot | sftp-ingest",
-  "event": "snake_case_event_name",
-  "request_id": "uuid-v4",
-  "trace_id": "langfuse-trace-id",
-  "user_id": "optional-authenticated-user-id"
+  "timestamp": "ISO-8601 (UTC)",
+  "level": "info | warning | error | critical | debug",
+  "service": "api | modelserver | chatbot",
+  "event": "logger name (e.g. app.infra.vault)",
+  "message": "human-readable message",
+  "request_id": "uuid v4 — empty outside request scope",
+  "trace_id": "langfuse trace id — empty outside request scope"
 }
 ```
 
-No `print()` statements in runtime paths.
+`request_id` and `trace_id` flow through Python `contextvars` set by `RequestContextMiddleware`, so every log call inside a request automatically carries them with no explicit threading.
+
+Healthcheck access-log noise (`GET /healthz` every 5s) is suppressed by `HealthzFilter` on the uvicorn access logger. Application-level logging from within `/healthz` is preserved.
 
 ### 12.3 Redaction
 
-A redaction layer in `app/infra/redaction.py` runs before any log line, trace span, or memory write leaves the service boundary. Patterns are defended in SECURITY.md. A test explicitly asserts that a message containing a fake API key never appears unredacted in logs, traces, or memory.
+A redaction layer in `app/infra/redaction.py` will run before any log line, trace span, or memory write leaves the service boundary. Patterns are defended in SECURITY.md. *(Phase 3.5.)*
 
 ## 13. Frontends
 

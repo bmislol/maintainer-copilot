@@ -61,6 +61,21 @@ docker compose logs modelserver
 
 If Vault is restarted, vault-init must also be re-run to re-seed the dev secrets (docker compose up -d --force-recreate vault-init). This is a dev-mode-only concern; production Vault uses persistent storage.
 
+**Manually proving Langfuse-refuse-to-boot:**
+
+```bash
+docker compose stop langfuse
+docker compose restart api
+docker compose logs api --tail=20
+# Expect: "REFUSING TO BOOT: Could not reach Langfuse at http://langfuse:3000: ..."
+# api container will be in Exited (3) state.
+
+# Restore:
+docker compose start langfuse
+sleep 10
+docker compose up -d api
+```
+
 ## 3. Bootstrap the First Admin User
 
 Filled by Phase 4.1.
