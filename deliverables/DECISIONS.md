@@ -214,6 +214,182 @@ None.
 
 ---
 
+## D-026: Vault Adapter Pattern
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+Phase 1.4 wires Vault into the application. The brief grades the layer boundary — services and routers must not touch external systems directly. Secrets are external.
+
+### Decision
+
+A single `load_secrets()` function in `app/infra/vault.py` resolves every runtime secret at startup. It returns a typed frozen dataclass `Secrets` with sub-objects for each path (`DatabaseSecrets`, `JWTSecrets`, etc.). The result is stored on `app.state.secrets` and read from there by services. No code outside `app/infra/vault.py` imports `hvac`.
+
+### Why
+
+- Matches the layer boundary: only `app/infra/` adapters touch external systems.
+- Centralizes the secret schema in one typed location, so adding a new secret requires updating exactly one file.
+- The dataclass is `frozen=True`, so accidental mutation at runtime is impossible.
+
+### Alternatives Considered
+
+- Let services read from Vault directly. Rejected because it puts `hvac` calls in business logic and breaks the layer rule.
+- Read each secret lazily on first access. Rejected because failures would surface at request time rather than at startup — the refuse-to-boot guarantee depends on resolving everything up front.
+
+### Trade-offs
+
+One extra indirection compared to direct Vault calls. The boundary is what makes the codebase testable and the layer rule defensible.
+
+---
+
+## D-027: Vault-init Container Pattern
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+Vault dev mode boots empty. Something must seed the KV paths before app services try to read them. Two natural options: seed inside the app at startup, or seed via a dedicated init container.
+
+### Decision
+
+A separate `vault-init` container runs once at compose startup, waits for `vault` to be healthy, writes all six KV paths with `vault kv put`, and exits 0. App services depend on it via `condition: service_completed_successfully`.
+
+### Why
+
+- Seeding is infra setup, not runtime concern. The app should not write secrets it consumes.
+- Clean separation: if seeding fails, vault-init's exit code makes that obvious in `docker compose ps -a`, and dependent services don't start.
+- Matches the same pattern used for `migrate` (Alembic).
+
+### Alternatives Considered
+
+- Seed inside `lifespan.py` at api startup. Rejected because it conflates the role of the app (reads secrets) and infra (writes them).
+- Seed manually via a one-time script the developer runs. Rejected because it breaks the brief's requirement that `docker compose up` from a fresh clone Just Works.
+
+### Trade-offs
+
+Vault dev mode stores state in memory, so a `vault` restart wipes all KV paths. After such a restart, vault-init must be re-run via `docker compose up -d --force-recreate vault-init`. This is dev-mode-only — production Vault uses persistent storage and never needs re-seeding. Documented in RUNBOOK §2.
+
+---
+
+## D-028: Langfuse Uses a Separate Postgres Database
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+Langfuse v2 stores its data in Postgres. Initial compose config pointed Langfuse at the same `copilot` database the application uses. This caused two problems in Phase 1.4:
+
+1. Alembic `--autogenerate` compared the application's six ORM models against the live database state, saw Langfuse's ~30 tables (`traces`, `observations`, `scores`, etc.) as "extra," and generated a destructive migration that would have dropped them all.
+2. Both Langfuse and the application want a `users` table. Schema collision.
+
+### Decision
+
+One Postgres instance, two databases:
+
+- `copilot` — application data (users, conversations, messages, widgets, audit_log, memory_long).
+- `langfuse` — Langfuse's own schema.
+
+A first-boot init script at `backend/scripts/postgres-init.sh` runs from `/docker-entrypoint-initdb.d/` and creates the `langfuse` database via a `\gexec` idempotent pattern. Langfuse's `DATABASE_URL` points at `…/langfuse`; the application's points at `…/copilot`.
+
+### Why
+
+- Schema isolation without paying for a second Postgres container.
+- Alembic only ever sees the application schema, so autogenerate is safe.
+- No name collisions.
+- The init script runs only on first volume bootstrap, so it's safe to leave in place forever.
+
+### Alternatives Considered
+
+- Two Postgres containers (one per app). Rejected — twice the memory and one more service to manage.
+- Separate schemas in the same database, using `search_path`. Rejected — Alembic's autogenerate would still see Langfuse's tables unless we filtered manually, which is more fragile than database-level isolation.
+
+### Trade-offs
+
+A tiny init script that runs only on fresh volumes. Documented in ARCH.md and RUNBOOK.md.
+
+---
+
+## D-029: Postgres Image — `pgvector/pgvector:pg16`
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+Long-term memory in Phase 4.3 uses the pgvector extension (`Vector(1536)` column on `memory_long`). The default `postgres:16-alpine` image does not include the extension files in `/usr/local/share/postgresql/extension/`, so `CREATE EXTENSION vector` fails with "extension control file not found."
+
+### Decision
+
+Use the official pgvector image: `pgvector/pgvector:pg16`. Same Postgres 16, ships pgvector C extension pre-compiled and installed.
+
+### Why
+
+- pgvector requires C extension files; pip-installing the Python bindings is not sufficient.
+- The image is published by the pgvector maintainers and tracks Postgres 16 stable.
+- Single drop-in replacement — no other docker-compose changes needed.
+
+### Alternatives Considered
+
+- Build a custom Dockerfile extending `postgres:16-alpine` and installing pgvector. Rejected — reinvents what `pgvector/pgvector:pg16` already provides.
+- Use the `ankane/pgvector` image. Older, less maintained.
+
+### Trade-offs
+
+Image is slightly larger than the alpine base. Functionally identical for our needs.
+
+---
+
+## D-030: Alembic `env.py` Accepts `DATABASE_URL` Override
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+Migrations are generated by running `alembic revision --autogenerate` on the developer's host machine, outside the docker network. The host cannot resolve `vault:8200` (the docker-internal hostname), so the standard Vault path fails when running alembic from the host.
+
+### Decision
+
+`alembic/env.py` checks for a `DATABASE_URL` environment variable first. If set, it uses that value directly. If not set, it falls back to `load_secrets()` from Vault.
+
+```python
+_db_url_override = os.environ.get("DATABASE_URL")
+if _db_url_override:
+    config.set_main_option("sqlalchemy.url", _db_url_override)
+else:
+    from app.infra.vault import load_secrets
+    secrets = load_secrets()
+    config.set_main_option("sqlalchemy.url", secrets.database.url)
+```
+
+Developer usage:
+
+```bash
+DATABASE_URL="postgresql+asyncpg://copilot:copilot-dev-password@localhost:5432/copilot" \
+  uv run alembic revision --autogenerate -m "..."
+```
+
+The `migrate` container inside docker has no `DATABASE_URL` set, so it goes through Vault.
+
+### Why
+
+- Keeps the runtime-resolves-from-Vault rule intact: at runtime inside docker, the override is absent.
+- Provides a single, explicit, well-commented escape hatch for the only legitimate use case (developer autogenerate).
+- The DB password isn't a real secret — it's a dev seed value committed in docker-compose — so exposing it to the host shell via the env-var path doesn't violate the secret-handling contract.
+
+### Alternatives Considered
+
+- Run autogenerate inside docker via `docker compose exec`. Rejected — the autogenerated migration file lands inside the container, not on the host filesystem where the developer can edit and commit it.
+- Hardcode the DB URL in `alembic.ini`. Rejected — would commit a credential pattern to source, even if the credential itself is a dev seed.
+
+### Trade-offs
+
+Small dual code path in `alembic/env.py`. The override is one `if/else`, well-commented for the Friday review.
+
 ## Pending Decisions
 
 Filled in as phases land. Reserved slots:
