@@ -179,6 +179,8 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/DECISIONS.md` D-009, `deliverables/ARCH.md` §10, `deliverables/EVALS.md` §1 (model entry).
 
+- [x] Phase 2.1 - done
+
 #### Phase 2.2 · Classical ML baseline
 
 - TF-IDF + LogisticRegression (or LinearSVC) trained on the same splits.

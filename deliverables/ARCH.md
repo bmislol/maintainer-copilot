@@ -206,6 +206,20 @@ backend/app/eval/classification/run_eval.py
 
 `model_card.json` fields: `sha256`, `backbone`, `tokenizer`, `freeze_policy`, `hyperparameters`, `training_data_hash`, `test_accuracy`, `test_macro_f1`, `per_class_f1`, `latency_p50_ms`, `trained_at`, `env_fingerprint`. Schema lives in `app/domain/model_card.py`.
 
+### 10.1 model_card.json contract (Phase 2.1, shipped)
+
+| Field | Value (shipped 2026-05-19) |
+|---|---|
+| sha256 | `a3bd4cb8f9328ce409169d14ef4585c27f1149ff2c69795de0e8e5759a8f3a59` |
+| backbone | `distilbert-base-uncased` |
+| tokenizer | `distilbert-base-uncased` |
+| freeze_policy | `full_finetune` |
+| training_data_sha256 | `1a4e887a580b5289d4b87fcff2890235c95945d78cd768f3e25933b3ca4c3959` |
+| test_accuracy | 0.8478 |
+| test_macro_f1 | 0.7462 |
+| per_class_f1 | bug 0.9255, feature 0.8148, docs 0.8845, question 0.3600 |
+| trained_at | 2026-05-19 (W&B run 6vaoq2zd) |
+
 ## 11. RAG Architecture
 
 | Concern | Choice | Filled by |

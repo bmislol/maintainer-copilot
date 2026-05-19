@@ -39,13 +39,11 @@ Access points:
 ## 2. Refuse-to-Boot Checks
 
 The `api` refuses to boot if:
-
 - Vault is unreachable.
 - Langfuse is misconfigured.
 - Any committed threshold in `eval_thresholds.yaml` is zero or disabled.
 
 The `modelserver` refuses to boot if:
-
 - Classifier weights are missing.
 - Weights' SHA-256 does not match `model_card.json`.
 - `test_macro_f1` in `model_card.json` is below the committed startup threshold.
@@ -57,6 +55,26 @@ docker compose logs vault-init
 docker compose logs migrate
 docker compose logs api
 docker compose logs modelserver
+```
+
+If Vault is restarted, vault-init must also be re-run...
+
+**Manually proving Vault refuse-to-boot:** ...
+
+**Manually proving Langfuse refuse-to-boot:** ...
+
+**Manually proving modelserver refuse-to-boot:**
+
+modelserver downloads `classifier.pt`, `tokenizer/`, and `model_card.json` from MinIO at startup. The refuse-to-boot conditions listed above are demonstrated as follows:
+
+```bash
+docker compose stop minio
+docker compose restart modelserver
+docker compose logs modelserver --tail=15
+# Expect: "could not download model_card.json" + REFUSING TO BOOT + Exited (3)
+
+docker compose start minio
+docker compose up -d modelserver
 ```
 
 If Vault is restarted, vault-init must also be re-run to re-seed the dev secrets (docker compose up -d --force-recreate vault-init). This is a dev-mode-only concern; production Vault uses persistent storage.
@@ -137,6 +155,8 @@ After a reset, re-run the first-time startup (Section 1) and the admin bootstrap
 ## 7. Common Issues
 
 Filled as the project grows. Reserved slots:
+
+**Langfuse race condition on fresh boot.** After `docker compose up -d` (especially following a `down -v`), api may refuse to boot because it tried to connect to Langfuse before Langfuse's web server started accepting connections. Langfuse has no docker healthcheck (DECISIONS D-004 explains why), so docker considers it "started" the moment its container exists. Wait ~20 seconds and re-run `docker compose up -d api`. The api's `auth_check()` against Langfuse is the real liveness probe.
 
 - Port collisions on first boot. If docker compose up fails with address already in use, find what's holding the port with sudo lsof -i :<port> and either stop the conflicting process or change the matching *_PORT in .env. The common offenders are 5432 (system Postgres) and 6379 (system Redis).
 

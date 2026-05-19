@@ -57,6 +57,7 @@ backend/app/classifier/models/*.bin
 
 # ─── Dataset cache ──────────────────────────────────────────────────
 backend/data/
+backend/data/classifier_artifacts/
 
 # ─── Eval reports go to MinIO ──────────────────────────────────────
 eval_reports/
