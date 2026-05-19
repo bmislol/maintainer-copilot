@@ -210,7 +210,7 @@ backend/app/eval/classification/run_eval.py
 
 | Concern | Choice | Filled by |
 |---|---|---|
-| Corpus | FastAPI docs + held-out slice of resolved issues with maintainer answers. Held-out issues do not appear in classifier training. | Phase 3.1 |
+| Corpus | scikit-learn docs + held-out slice of resolved issues with maintainer answers. Held-out issues do not appear in classifier training (strict separation). | Phase 3.1 |
 | Embedding model | TBD | Phase 3.1 |
 | Chunking strategy | Not naive fixed-size. TBD. | Phase 3.2 |
 | Vector store | pgvector | Phase 3.2 |
