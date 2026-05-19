@@ -140,6 +140,8 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/SECURITY.md` §3, §9 (refuse-to-boot), `deliverables/ARCH.md` §9.
 
+- [x] Phase 1.4 - done
+
 #### Phase 1.5 · Langfuse + structured logging
 
 - `app/infra/tracing.py` wraps the Langfuse SDK.

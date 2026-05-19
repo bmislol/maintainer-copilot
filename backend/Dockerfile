@@ -22,6 +22,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ─── Source layer ──────────────────────────────────────────────────
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 
 # Install the project itself (does not re-resolve deps)
 RUN --mount=type=cache,target=/root/.cache/uv \

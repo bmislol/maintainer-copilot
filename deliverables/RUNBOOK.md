@@ -22,7 +22,7 @@ Expected startup order:
 5. `migrate` runs `alembic upgrade head` and exits.
 6. `modelserver`, `api`, `chatbot`, `widget`, `host` start.
 
-Access points (filled out fully by Phase 1.3):
+Access points:
 
 | Service | URL |
 |---|---|
@@ -58,6 +58,8 @@ docker compose logs migrate
 docker compose logs api
 docker compose logs modelserver
 ```
+
+If Vault is restarted, vault-init must also be re-run to re-seed the dev secrets (docker compose up -d --force-recreate vault-init). This is a dev-mode-only concern; production Vault uses persistent storage.
 
 ## 3. Bootstrap the First Admin User
 
