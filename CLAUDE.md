@@ -31,7 +31,7 @@ For the full flow diagram, layer rules, endpoint inventory, and refuse-to-boot l
 
 | Decision | Choice | Detail |
 |---|---|---|
-| Dataset source | `tiangolo/fastapi` GitHub repo (closed issues + docs) | `deliverables/DECISIONS.md` D-002 |
+| Dataset source | `scikit-learn/scikit-learn` GitHub repo (closed issues + docs) | `deliverables/DECISIONS.md` D-002 |
 | LLM provider | Anthropic Claude (only) | `deliverables/DECISIONS.md` D-003 |
 | Tracing backend | Langfuse, self-hosted in compose | `deliverables/DECISIONS.md` D-004 |
 | Package manager | `uv` | `deliverables/DECISIONS.md` D-005 |
@@ -155,13 +155,15 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 #### Phase 1.6 · Dataset fetch + splits
 
-- `scripts/fetch_issues.py` pulls closed issues from `tiangolo/fastapi` via the GitHub API. Caches raw JSON to `backend/data/issues/raw/` (gitignored).
+- `scripts/fetch_issues.py` pulls closed issues from `scikit-learn/scikit-learn` via the GitHub API. Caches raw JSON to `backend/data/issues/raw/` (gitignored).
 - `scripts/build_dataset.py` normalises issues → JSONL, applies the label → class mapping (defended in DECISIONS D-007).
 - Stratified time-based split: test set is strictly more recent than train. Sizes recorded in DECISIONS D-008.
 - Training data hash (SHA-256 of the sorted training JSONL) committed for the model card.
 - (Optional but ideal) kick off Colab fine-tuning at end of day so it cooks overnight.
 
 **Deliverables updated:** `deliverables/DECISIONS.md` D-007, D-008.
+
+- [x] Phase 1.6 - done
 
 ---
 

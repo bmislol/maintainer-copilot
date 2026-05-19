@@ -62,35 +62,40 @@ More files early. Worth it for the grade and for staying sane during the chatbot
 
 ---
 
-## D-002: Dataset Source — `tiangolo/fastapi`
+## D-002: Dataset Source — `scikit-learn/scikit-learn`
 
-Status: Accepted
-Date: 2026-05-18
+Status: Accepted (revised)
+Date: 2026-05-19 (originally accepted 2026-05-18 with FastAPI; revised after empirical inspection)
 
 ### Context
 
-The brief requires picking one open-source repo and using its closed issues as the classification dataset. The choice has to support: enough closed-issue volume for train/val/test splits, labels that map cleanly to bug / feature / docs / question, English-dominant text, and a public docs corpus for the RAG side.
+The brief requires picking one open-source repo and using its closed issues as the classification dataset. The choice has to support: enough closed-issue volume for stratified train/val/test splits, labels that map cleanly to bug / feature / docs / question, English-dominant text, and a public docs corpus for the RAG side.
 
 ### Decision
 
-Use the `tiangolo/fastapi` GitHub repository as the dataset source. Closed issues are fetched via the GitHub REST API; the project's published documentation (the `docs/` directory of the repo, or the rendered docs site) is the RAG corpus.
+Use the `scikit-learn/scikit-learn` GitHub repository. Closed issues are fetched via the GitHub REST API (pages 1–99, the offset-pagination limit) and via the GraphQL API (cursor-based, for issues beyond the REST 10k-offset wall). The project's published documentation is the RAG corpus (Phase 3.1).
 
 ### Why
 
-- Thousands of closed issues with active maintainer labeling.
-- Native labels map naturally: `bug` → bug, `feature` → feature, `docs` → docs, `question` → question.
-- English-dominant.
-- The docs site is large, well-structured Markdown — good RAG corpus.
-- The persona ("FastAPI maintainer triaging issues") is the demo. The story writes itself.
+- Mature labeling discipline. Maintainers consistently apply `Bug`, `Documentation`, `New Feature`, `Enhancement`, `Needs Triage`, and `help wanted` labels.
+- ~10k closed issues retrievable across both pagination strategies, yielding 3,844 classifiable examples after deduplication, label mapping, and CI-bot template filtering.
+- Class balance is workable: 5.2:1 ratio between the largest (`bug`) and smallest (`question`) class in the training split. Stable per-class F1 numbers are achievable.
+- A peer's hands-on comparison ranked scikit-learn at the top against LangChain and pandas as a dataset source.
+
+### Why this changed from the initial FastAPI choice
+
+The initial inspection of FastAPI's issue labels showed sparse and inconsistent labeling — most issues without `bug`/`feature`/`docs` class labels, no `question` label, only ~3,000 issues total. LangChain (#2 candidate) had only 14 documentation-labeled issues; transformers (#3) had only 5. Across all three alternatives, no mature OSS repo uses a literal `question` label — the convention is to redirect questions to StackOverflow or Discord. scikit-learn turned out to have the cleanest maintainer-applied labels of the four projects we sampled, despite needing a documented proxy for the `question` class (see D-007).
 
 ### Alternatives Considered
 
-- `pydantic/pydantic` — clean labels but lower volume.
-- `huggingface/transformers` — huge volume but the docs corpus is sprawling and would burn a day on preprocessing.
+- `tiangolo/fastapi` — rejected due to sparse class labeling and no `question` label.
+- `langchain-ai/langchain` — rejected: only 14 documentation-labeled issues; not trainable for the docs class.
+- `huggingface/transformers` — rejected: only 5 documentation-labeled issues; not trainable for the docs class.
+- `pydantic/pydantic` — rejected: lower volume than scikit-learn.
 
 ### Trade-offs
 
-The FastAPI label set is not perfectly clean. The exact label→class mapping is documented separately in this file (see D-XXX, filled by Phase 1.6).
+GitHub's REST API caps offset pagination at ~10k results. The GraphQL fetcher chain extends beyond that via cursor pagination, but we still see only the most recent ~10k issues after deduplication. This is plenty of training signal for the project. Documented in the build pipeline (`scripts/fetch_issues.py` and `scripts/fetch_issues_graphql.py`).
 
 ---
 
@@ -213,6 +218,104 @@ Both names describe purpose. "Admin" is unambiguous for the internal maintainer-
 None.
 
 ---
+
+## D-007: Issue Label → Class Mapping
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+The brief's four-class spec (bug / feature / docs / question) does not map perfectly onto scikit-learn's actual labeling vocabulary. scikit-learn does not use a literal `question` label — their convention redirects user questions to StackOverflow. We need a mapping that preserves the spec while staying honest about what the data contains.
+
+### Decision
+
+The following raw-label → class mapping is applied by `scripts/build_dataset.py`:
+
+| Raw label | Mapped class |
+|---|---|
+| `Bug`, `Regression` | bug |
+| `Documentation` | docs |
+| `New Feature`, `Enhancement` | feature |
+| `Needs Triage`, `help wanted` | question |
+
+**Excluded labels** (do not map to any class):
+
+- Difficulty tags: `Easy`, `good first issue`, `Moderate`, `Blocker`
+- Status tags: `Needs Investigation`, `Needs Decision`, `Needs Info`, `Needs Reproducible Code`, `Meta-issue`, `RFC`
+- Module tags: `module:linear_model`, `module:tree`, etc.
+- Domain-ambiguous: `Performance`, `API`, `Array API`, `Build / CI`
+- Noise: `spam`
+
+**Excluded categories:**
+
+- Issues with no class-mapping label.
+- Issues with conflicting multi-class labels (e.g., both `Bug` and `Documentation`) — ambiguous, excluded from training.
+- Pull requests (GitHub's issues endpoint returns both; PRs are filtered).
+- CI-bot template issues (see Trade-offs below).
+
+### Why the `question` proxy
+
+scikit-learn does not have a literal `question` label. The `Needs Triage` and `help wanted` labels are the maintainer's own workflow signal for "issue not yet categorized, possibly needs more info, often from a user seeking help." This is not a perfect semantic fit for "question" in the abstract, but it is the closest *maintainer-applied* signal available, and it avoids the alternative of synthesizing the class from text patterns.
+
+### Alternatives Considered
+
+- **Text-heuristic question class** — issues matching regex patterns (`^how`, `^what`, ends with `?`, etc.). Rejected: empirical inspection showed 80% of the resulting class came from regex matches with no maintainer signal, which would make the trained classifier circular (it learns the heuristic, not the concept).
+- **Drop the question class, train 3-class.** Rejected once the `Needs Triage` + `help wanted` proxy was discovered, since the spec is honored without compromise.
+
+### Trade-offs
+
+- The question class semantics are slightly elastic. Some `Needs Triage` issues are bugs, features, or doc issues that simply haven't been categorized yet by maintainers. We accept that the question class will have noisier signal than bug/feature/docs. The three-way model comparison in Phase 2.3 will surface this honestly.
+- **CI bot filter.** scikit-learn's CI runs auto-open templated issues titled `⚠️ CI failed ...` when nightly builds fail. They get auto-tagged `Needs Triage` by default. Including them in the question class would teach the classifier to recognize a specific machine template rather than human question text. The build script filters issues whose title contains "CI failed" in the first 30 characters. This is the only template-class filter we apply; future templates appearing at scale would be added here.
+
+### Quantified outcome (Phase 1.6)
+
+- 3,844 issues classified
+- 5,270 issues excluded (no classifying label)
+- 1,130 issues excluded (ambiguous multi-class)
+- 656 issues excluded (CI-bot-generated failure reports)
+- 7,578 PRs filtered out (issues endpoint returns both)
+
+
+## D-008: Train / Val / Test Split Strategy
+
+Status: Accepted
+Date: 2026-05-19
+
+### Context
+
+The brief requires "stratified splits, test strictly more recent in time than train." This combines two constraints: temporal ordering and class balance. They are mutually exclusive in the strict sense — a temporally ordered split cannot also guarantee identical class proportions across splits.
+
+### Decision
+
+Sort all classified issues by `created_at` ascending. Take the first 70% as train, the next 15% as val, the last 15% as test. Class stratification is not explicitly enforced; the time-based ordering is the priority.
+
+Resulting splits:
+
+| Split | n | bug | feature | docs | question |
+|---|---|---|---|---|---|
+| train | 2690 | 1023 | 798 | 673 | 196 |
+| val | 576 | 226 | 112 | 140 | 98 |
+| test | 578 | 274 | 89 | 149 | 66 |
+
+Training data SHA-256: `1a4e887a580b5289d4b87fcff2890235c95945d78cd768f3e25933b3ca4c3959`. This hash is referenced from `model_card.json` in Phase 2.1.
+
+### Why time-based, not random
+
+The brief explicitly demands "test strictly more recent in time than train." This simulates the real-world scenario the classifier ships into: it will see new issues, not old ones, and test metrics should reflect that distribution.
+
+### Why not explicit stratification
+
+Stratified time-based splits are mutually exclusive in the strict sense. You can have *either* "test is strictly newer than train" *or* "test has the same class distribution as train," not both. We prioritize the temporal constraint because that is what the brief demands and what mirrors production reality.
+
+### Observed temporal drift
+
+The `question` class is overrepresented in val (98 / 576 ≈ 17%) and test (66 / 578 ≈ 11%) relative to its share in train (196 / 2690 ≈ 7%). This reflects a real shift in scikit-learn's recent triage workflow — more issues are being left in `Needs Triage` lately than in earlier years. Test-set F1 on `question` will therefore reflect *current* labeling practices, not the historical average. This is the kind of distribution shift the time-based split is designed to surface.
+
+### Trade-offs
+
+- Test-set per-class F1 will have moderate variance due to small per-class counts (smallest class in test: `question` at 66; smallest classified class in test: `feature` at 89).
+- Models that fail to generalize across temporal label drift will be penalized. This is desired — it tests robustness, not memorization.
 
 ## D-026: Vault Adapter Pattern
 
@@ -455,8 +558,6 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 
 Filled in as phases land. Reserved slots:
 
-- **D-007 — Issue label → class mapping for FastAPI dataset.** Filled by Phase 1.6.
-- **D-008 — Train/val/test split strategy and sizes.** Filled by Phase 1.6.
 - **D-009 — Fine-tuned classifier backbone, hyperparameters, and freeze policy.** Filled by Phase 2.1.
 - **D-010 — Classical ML baseline pipeline.** Filled by Phase 2.2.
 - **D-011 — LLM classification baseline (prompt, structured output strategy, latency/cost budget).** Filled by Phase 2.3.
