@@ -18,6 +18,7 @@ from app.db.models import (  # noqa: E402, F401
     conversations,
     memory_long,
     messages,
+    rag_chunks,
     users,
     widgets,
 )
