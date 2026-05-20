@@ -4,20 +4,22 @@ Last updated: 2026-05-18
 
 Two golden eval suites gate CI. Thresholds live in `eval_thresholds.yaml` at the repo root. A regression below threshold blocks merge. Every run writes an `eval_report.json` to MinIO and is diffed against the previous green build.
 
-### 1. Classification (Phase 2.1 + Phase 2.2)
+### 1. Classification (Phase 2.1 + Phase 2.2 + Phase 2.3 — final)
 
-Three-classifier comparison plan from D-012 (Phase 2.3): classical / fine-tuned / LLM.
-Phase 2.2 ships the first two; Phase 2.3 adds the LLM.
+Three-way (four-row) comparison on the same 578-example test set (D-008).
 
-| Classifier | Test Accuracy | Test Macro-F1 | F1 bug | F1 feature | F1 docs | F1 question |
-|---|---|---|---|---|---|---|
-| **DistilBERT (fine-tuned)** | **0.8478** | **0.7462** | 0.9255 | 0.8148 | 0.8845 | 0.3600 |
-| LogReg + TF-IDF (classical) | 0.8201 | 0.6977 | 0.8961 | 0.7826 | 0.8562 | 0.2558 |
-| Claude (LLM, structured output) | TBD Phase 2.3 | — | — | — | — | — |
+| Classifier | Test Accuracy | Test Macro-F1 | F1 bug | F1 feature | F1 docs | F1 question | $/1k issues |
+|---|---|---|---|---|---|---|---|
+| Classical (TF-IDF + LogReg) | 0.8201 | 0.6977 | 0.8961 | 0.7826 | 0.8562 | 0.2558 | $0.00 |
+| DistilBERT (fine-tuned) | 0.8478 | 0.7462 | 0.9255 | 0.8148 | 0.8845 | 0.3600 | $0.00 |
+| **Haiku 4.5 (winner)** | **0.8495** | **0.7664** | 0.9122 | 0.7958 | **0.8881** | **0.4694** | $1.84 |
+| Sonnet 4.6 | 0.8114 | 0.7329 | 0.8924 | 0.7729 | 0.8199 | 0.4464 | $5.40 |
 
-**Splits:** 2690 train / 576 val / 578 test, time-based (test strictly newer than train). See D-008.
+**Deployment recommendation:** Haiku 4.5 for the chatbot's classify tool (Phase 4.2). DistilBERT remains in `modelserver` as the engineering proof of a fine-tuned classifier with refuse-to-boot, MinIO artifacts, and SHA-256 verification.
 
-**Threshold:** modelserver refuses to boot if `test_macro_f1 < 0.60`. Currently 0.7462 — 14 points of headroom (see D-009).
+**Threshold:** modelserver refuses to boot if `test_macro_f1 < 0.60` (D-009). DistilBERT's 0.7462 has 14 points of headroom.
+
+**Key insight (D-012):** Sonnet underperformed Haiku on every metric. The cheaper smaller LLM was the winner. We did not optimize the prompt for Sonnet — that's a known unexplored optimization, documented but not pursued.
 
 **Notable observation.** Both classifiers struggle most on the `question` class (F1 0.36 / 0.26). This is expected and documented in D-007 — the question label is a maintainer-workflow proxy (`Needs Triage` + `help wanted`), not a literal question tag, so the class signal is noisy by construction. Phase 2.3's LLM baseline is expected to outperform here because Claude can reason about "is this a question?" without depending on label cleanness.
 

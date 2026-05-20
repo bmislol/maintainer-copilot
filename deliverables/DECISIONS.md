@@ -447,6 +447,133 @@ DistilBERT wins on every class, by 5 macro-F1 points overall — a real but not 
 - Artifacts: `data/classical_baseline_artifacts/{vectorizer.pkl,classifier.pkl,comparison_report.json}`
 
 
+## D-011: LLM Classification Baseline — Anthropic Claude
+
+Status: Accepted
+Date: 2026-05-20
+
+### Context
+
+The brief requires a three-way classifier comparison (classical / fine-tuned / LLM). Phase 2.1 shipped DistilBERT; Phase 2.2 shipped the classical TF-IDF + LogReg baseline. This phase scores the same 578-example test set with Claude.
+
+### Decision
+
+Score the test set with **two Claude models**: Haiku 4.5 (`claude-haiku-4-5`) and Sonnet 4.6 (`claude-sonnet-4-6`). Each prediction is a tool-use call to a structured-output schema, producing a typed `{label, reasoning}` response. Concurrency 5, exponential backoff retries (3 attempts), and per-prediction JSONL caching so re-runs skip already-scored issues.
+
+### Prompt structure
+
+SYSTEM:
+You are classifying GitHub issues for the scikit-learn maintainers.
+Each issue is one of:
+
+bug: existing functionality fails, raises unexpected error, or wrong output
+feature: request for new capability or enhancement
+docs: documentation missing, unclear, or incorrect
+question: user is asking how something works, needs help, or lacks detail
+
+Edge cases:
+
+"Improve performance of X" → feature (it's an enhancement)
+"X documentation says Y but does Z" → bug (incorrect docs that mislead users)
+"How do I make X do Y?" → question
+Detailed reproductions with tracebacks → bug
+
+USER:
+Title: <issue title>
+Body: <issue body, truncated to 1500 chars>
+
+The tool schema forces `label ∈ {bug, feature, docs, question}` via `enum`, and `reasoning` is a single-sentence required field.
+
+### Why two models, not one
+
+Originally only Sonnet was planned. After running Sonnet we noticed Haiku 4.5 (which we ran as a smoke test) is one-third the cost and could plausibly be sufficient. Running both gives us a cost/quality datapoint that's directly relevant to the deployment recommendation in D-012.
+
+### Why tool_use, not free-form prompts
+
+Free-form Claude output requires parsing JSON or extracting labels from prose — both are unreliable on edge cases. The tool_use API with `tool_choice={"type": "tool", "name": "classify_issue"}` forces Claude to emit a tool call whose `input` is type-validated by the schema. Invalid labels are impossible by construction.
+
+### Quantified outcome (Phase 2.3)
+
+| Model | Test Accuracy | Test Macro-F1 | F1 question | Total Cost | $/1k issues |
+|---|---|---|---|---|---|
+| Haiku 4.5  | 0.8495 | 0.7664 | 0.4694 | $1.06 | $1.84 |
+| Sonnet 4.6 | 0.8114 | 0.7329 | 0.4464 | $3.12 | $5.40 |
+
+Per-class F1 in `data/llm_baseline_artifacts/comparison_report.json`. Both runs at concurrency 5, took ~3 minutes wall time each.
+
+### Trade-offs
+
+- Token budget assumes ~200 output tokens for label + one-sentence reasoning. A leaner schema (label only, no reasoning) would cut output cost by ~75% but lose the reasoning text that's useful for Phase 2.4 error analysis. Worth the cost.
+- The cached JSONL approach means a mid-run failure costs only the un-scored examples on retry. We can fail loud and recover cheaply.
+- No prompt-engineering iteration was done — both models use the same prompt. A model-specific prompt might improve Sonnet (which currently underperforms Haiku — see D-012). Out of scope for Phase 2.3; documented as a known optimization not pursued.
+
+## D-012: Three-Way Classifier Comparison and Deployment Choice
+
+Status: Accepted
+Date: 2026-05-20
+
+### Context
+
+The brief grades the *comparison* across approaches (D-007 → D-011): "which approach won and why." Phase 2.1 + 2.2 + 2.3 produced four real numbers on the same test set; this decision documents what they tell us and what the project should ship.
+
+### The numbers (test set, n=578)
+
+| Classifier                  | Accuracy | Macro-F1 | F1 bug | F1 feature | F1 docs | F1 question | $/1k issues |
+|---|---|---|---|---|---|---|---|
+| Classical (TF-IDF+LogReg)   | 0.8201 | 0.6977 | 0.8961 | 0.7826 | 0.8562 | 0.2558 | $0.00 |
+| DistilBERT (fine-tuned)     | 0.8478 | 0.7462 | 0.9255 | 0.8148 | 0.8845 | 0.3600 | $0.00 |
+| **Haiku 4.5**               | **0.8495** | **0.7664** | 0.9122 | 0.7958 | **0.8881** | **0.4694** | $1.84 |
+| Sonnet 4.6                  | 0.8114 | 0.7329 | 0.8924 | 0.7729 | 0.8199 | 0.4464 | $5.40 |
+
+### Three real observations
+
+**1. The fine-tune earns its keep, modestly.** DistilBERT (0.7462) beats classical (0.6977) by 5 macro-F1 points. That's a real improvement, but not a runaway. On bug, feature, docs (the well-labeled classes), the gap is 3-4 F1 points per class. On the noisy `question` class (D-007), DistilBERT pulls ahead by 10 points (0.36 vs 0.26) — contextual embeddings do better with noisy labels than bag-of-n-grams.
+
+**2. Haiku beats DistilBERT.** This was not expected. A small commercial LLM at $1.84 per 1000 issues outperforms our fine-tuned encoder by 2 macro-F1 points without any training. The win is concentrated in the `question` class (0.4694 vs 0.3600 — 30% relative improvement). For a noisy synthetic class, an LLM's ability to reason about "is this a question?" beats a fine-tuned classifier's ability to memorize what `Needs Triage` text looks like.
+
+**3. Sonnet *loses* to Haiku.** Across every metric — accuracy, macro-F1, every per-class F1 — the cheaper smaller model wins. Possible reasons:
+- Classification of short text is a task where reasoning capacity is *wasted*. Haiku does the obvious thing; Sonnet may second-guess.
+- The prompt was tuned on neither model. A more nuanced prompt with chain-of-thought might unlock Sonnet's reasoning, but at additional cost.
+- Sonnet's tool-use compliance may be tuned differently — it may be more inclined to express uncertainty rather than commit to a label.
+
+We did not investigate further; the result is the result, and it's a real production data point.
+
+### Deployment choice
+
+**For the chatbot's classify tool in Phase 4.2: ship Haiku 4.5.**
+
+Reasoning:
+- Best macro-F1 of the four (0.7664)
+- Best F1 on the hard class — `question` — by a wide margin (0.4694)
+- Cheapest of the LLM tier ($1.84/1k); ~3x cheaper than Sonnet
+- ~2-3x faster latency than Sonnet (relevant for chatbot tool-call UX)
+- No training, no GPU dependency, no model artifact to ship and maintain
+
+**For the modelserver and Phase 2.1's `POST /classify` endpoint: keep DistilBERT.**
+
+Reasoning:
+- The brief grades "fine-tune a small encoder for classification with a model card." Phase 2.1 produced that artifact; removing it would weaken the engineering story.
+- Modelserver demonstrates we know how to ship a containerized fine-tuned model with refuse-to-boot, MinIO artifact contracts, and SHA-256 verification — these are independently valuable engineering proofs.
+- The chatbot's classify tool calls Haiku; modelserver remains the proof point that *if* a future team needed offline classification (no LLM API available), the path from train to production is wired.
+
+### Why this matters
+
+The brief asks (Think About): *"Where does the comparison shift if your data changes? If labels get cleaner? If a frontier model gets cheaper?"*
+
+- **If labels get cleaner** (e.g., scikit-learn adds a real `question` label), the `question` class F1 gap closes. DistilBERT might catch up to Haiku.
+- **If a frontier model gets cheaper** (e.g., Haiku 5 launches at $0.30/M input), the LLM cost argument strengthens further; classical and fine-tuned become hard to justify.
+- **If our throughput grew 1000x**, the $1.84/1k cost compounds: 100k issues/day = $184/day = ~$67k/year vs. classical at zero marginal cost. At that scale, the fine-tune's "free at inference time" advantage becomes worth pursuing.
+
+The deployment recommendation is **specific to our current scale** (one maintainer, scikit-learn issue volume). It's not a universal "LLMs always win."
+
+### Quantified outcome
+
+- Winner on macro-F1: Haiku 4.5 (0.7664)
+- Winner on `question` class: Haiku 4.5 (0.4694)
+- Winner on cost: Classical and DistilBERT (tied, $0 marginal)
+- Best cost/quality ratio: Haiku 4.5
+- Deployment recommendation: Haiku for chatbot, DistilBERT for modelserver
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -688,8 +815,6 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 
 Filled in as phases land. Reserved slots:
 
-- **D-011 — LLM classification baseline (prompt, structured output strategy, latency/cost budget).** Filled by Phase 2.3.
-- **D-012 — Three-way classifier comparison and deployment choice.** Filled by Phase 2.3.
 - **D-013 — Classification eval thresholds in `eval_thresholds.yaml`.** Filled by Phase 2.4.
 - **D-014 — NER and summarization tool choices.** Filled by Phase 2.5.
 - **D-015 — Embedding model and retrieval-quality number vs at least one alternative.** Filled by Phase 3.1.
