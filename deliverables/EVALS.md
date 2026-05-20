@@ -15,6 +15,22 @@ Three-way (four-row) comparison on the same 578-example test set (D-008).
 | **Haiku 4.5 (winner)** | **0.8495** | **0.7664** | 0.9122 | 0.7958 | **0.8881** | **0.4694** | $1.84 |
 | Sonnet 4.6 | 0.8114 | 0.7329 | 0.8924 | 0.7729 | 0.8199 | 0.4464 | $5.40 |
 
+**Classification CI gate (Phase 2.4 — implemented):**
+
+| Aspect | Value |
+|---|---|
+| Golden set size | 25 examples (7 bug / 7 feature / 6 docs / 5 question) |
+| Golden set source | Hand-curated from `test.jsonl` (D-013) |
+| Gate model | Haiku 4.5 (winner from D-012) |
+| Threshold (macro-F1) | 0.90 (committed in `backend/eval_thresholds.yaml`) |
+| Threshold (per-class F1) | 0.50 |
+| First measured Haiku score | 1.0000 macro-F1, all classes 1.0000 |
+| CI workflow | `.github/workflows/eval-classification.yml` |
+| Trigger | Path-relevant PRs + manual dispatch |
+| Run cost | ~$0.05 per invocation |
+
+The api refuses to boot if any threshold in `backend/eval_thresholds.yaml` is zero or missing — defending against "silent CI disabled by setting threshold to 0" failure mode.
+
 **Deployment recommendation:** Haiku 4.5 for the chatbot's classify tool (Phase 4.2). DistilBERT remains in `modelserver` as the engineering proof of a fine-tuned classifier with refuse-to-boot, MinIO artifacts, and SHA-256 verification.
 
 **Threshold:** modelserver refuses to boot if `test_macro_f1 < 0.60` (D-009). DistilBERT's 0.7462 has 14 points of headroom.

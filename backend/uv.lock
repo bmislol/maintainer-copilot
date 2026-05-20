@@ -1382,6 +1382,7 @@ dependencies = [
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "scikit-learn" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "tenacity" },
@@ -1402,6 +1403,7 @@ dev = [
     { name = "ruff" },
     { name = "tqdm" },
     { name = "types-hvac" },
+    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
@@ -1420,6 +1422,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "pydantic", specifier = ">=2.9.0" },
     { name = "pydantic-settings", specifier = ">=2.5.0" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "scikit-learn", specifier = ">=1.5.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
     { name = "tenacity", specifier = ">=9.0.0" },
@@ -1440,6 +1443,7 @@ dev = [
     { name = "ruff", specifier = ">=0.7.0" },
     { name = "tqdm", specifier = ">=4.66.0" },
     { name = "types-hvac", specifier = ">=2.4.0.20260518" },
+    { name = "types-pyyaml", specifier = ">=6.0.0" },
 ]
 
 [[package]]
@@ -3352,6 +3356,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cf/a5/188d9268b9c3322ba39d0864b75b385a3a412c705732895ff7d14ab92503/types_hvac-2.4.0.20260518.tar.gz", hash = "sha256:80cfede2dc2295422ba411a03c502a11f786f612fb6c01e5086afaaacf533783", size = 24415, upload-time = "2026-05-18T06:08:15.747Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/35/0231dfbb4c02cc15e222583b5255d94921eb5f20bca157a56ad6ffa73157/types_hvac-2.4.0.20260518-py3-none-any.whl", hash = "sha256:58ce62c625d123a1a8530a8cd9687a61d7b1061b5e682d562f3f2297bed5fad4", size = 42395, upload-time = "2026-05-18T06:08:14.925Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260518"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/83/4a1afc3fbfcf5b8d46fc390cd95ed6b0dc9010a265f4e9f46314efffa37a/types_pyyaml-6.0.12.20260518.tar.gz", hash = "sha256:d917f83fb38462550338c1297faedd860b3ec83912b96b1e3d73255f7473e466", size = 17850, upload-time = "2026-05-18T06:01:58.675Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/a2/c01db32be2ae7d6a1689972f3c492b149ee4e164b12fdfd9f64b50888215/types_pyyaml-6.0.12.20260518-py3-none-any.whl", hash = "sha256:d2150f75a231c9fe9c7463bd29487d93e60bac90400287351384bc2284eba7cd", size = 20312, upload-time = "2026-05-18T06:01:57.368Z" },
 ]
 
 [[package]]

@@ -30,6 +30,8 @@ dependencies = [
 
     "anthropic>=0.40.0",
     "tenacity>=9.0.0",
+
+    "pyyaml>=6.0.0",
 ]
 
 [dependency-groups]
@@ -43,6 +45,7 @@ dev = [
     "tqdm>=4.66.0",
     "nbformat>=5.10.0",
     "ipykernel>=7.0.0",
+    "types-PyYAML>=6.0.0",
 ]
 
 # ─── ruff ──────────────────────────────────────────────────────────
@@ -109,4 +112,8 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+]
+
+markers = [
+    "eval: requires ANTHROPIC_API_KEY, runs Haiku against committed golden set thresholds",
 ]

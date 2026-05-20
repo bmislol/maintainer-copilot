@@ -1,0 +1,45 @@
+name: eval-classification
+
+# Runs the LLM evaluation gate against the committed golden set.
+# Triggered on PRs that modify the prompt, the golden set, or eval code.
+# Also manually dispatchable from the Actions tab.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/app/**'
+      - 'backend/tests/test_eval_classification.py'
+      - 'backend/data/eval/**'
+      - 'backend/eval_thresholds.yaml'
+      - '.github/workflows/eval-classification.yml'
+      - 'backend/pyproject.toml'
+      - 'backend/uv.lock'
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: run classification eval gate
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          uv run pytest -m eval -v --tb=short

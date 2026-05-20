@@ -25,6 +25,8 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 
+COPY eval_thresholds.yaml ./eval_thresholds.yaml
+
 # Install the project itself (does not re-resolve deps)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev

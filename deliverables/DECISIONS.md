@@ -574,6 +574,71 @@ The deployment recommendation is **specific to our current scale** (one maintain
 - Best cost/quality ratio: Haiku 4.5
 - Deployment recommendation: Haiku for chatbot, DistilBERT for modelserver
 
+## D-013: Classification Eval Gate — Golden Set and CI Threshold
+
+Status: Accepted
+Date: 2026-05-20
+
+### Context
+
+Phase 2.4 introduces the first eval gate in the project. The brief explicitly grades this: "Eval gates that actually mean something." A gate exists when (a) there's a stable, hand-curated truth set, (b) a committed threshold a future change must meet, and (c) CI mechanics that fail red on regression.
+
+### Decision
+
+**Golden set:** 25 hand-curated examples from `test.jsonl`, stratified across the four classes (7 bug / 7 feature / 6 docs / 5 question). Stored at `backend/data/eval/eval_classification.jsonl`. Committed to git — it's <50KB and small enough that diff-friendliness wins over data hygiene.
+
+**Threshold:** `macro_f1: 0.90`, `per_class_min_f1: 0.50`. Committed to `backend/eval_thresholds.yaml`. The api refuses to boot if either is `<= 0`, defending against "I disabled CI by zeroing the threshold" silent failures.
+
+**CI mechanics:** `@pytest.mark.eval` marker on the test. Default `pytest` skips it (free, runs on every PR). `pytest -m eval` runs it (~$0.05, runs only via `.github/workflows/eval-classification.yml` on path-relevant PRs and manual dispatch).
+
+### How the golden set was built
+
+We curated from `test.jsonl` (not fresh GitHub issues) because:
+- Haiku is a frozen external API, not something we trained on
+- DistilBERT was trained on `train.jsonl`, never touched test
+- Using test for a CI smoke gate doesn't leak any training signal
+
+The interactive curator script (`backend/scripts/curate_golden_set.py`) prioritized examples where Haiku 4.5 already predicted the gold label correctly. This is the *regression floor* strategy: the floor is what currently works. A future change that breaks one of these 25 cases is a real regression.
+
+For each candidate the human reviewer accepted only if:
+- The gold label was unambiguous (a maintainer would agree without context)
+- The issue text was well-formed (not a CI bot template, not a one-liner)
+- Both bug-vs-question and feature-vs-bug were clearly resolvable
+
+Rejected examples are tracked in `backend/data/eval/.rejected_ids.json` for resumability.
+
+### Why `macro_f1: 0.90`
+
+Haiku scored 1.0 on the golden set (the entire 25-example set classified correctly) — see the W&B run and the local pytest output. Setting the floor at:
+
+- **0.95**: too tight. LLM non-determinism (default temperature, no caching across runs) plausibly flips 1-2 predictions on re-run. A floor at 0.95 trips on 2 wrong → spurious CI failures.
+- **0.85**: too loose. 4 wrong predictions still pass (4/25 mistakes → macro-F1 ~0.85). Real regressions could slip through.
+- **0.90**: tight but kind. Tolerates 1-2 mistakes from natural variance (1 wrong → ~0.96, 2 wrong → ~0.92). Trips on 3+ which is a real signal of breakage.
+
+The `per_class_min_f1: 0.50` is a separate gate — even if macro stays high, a class dropping to zero means a complete mispredict pattern (e.g., the model started predicting all `question` as `bug`). Catches modal collapse that macro-F1 alone might miss.
+
+### What this catches
+
+- Prompt regression (someone edits SYSTEM_PROMPT to be less specific)
+- Tool-use schema regression (struct output breaks)
+- Model deprecation (Haiku 4.5 is retired, falls back to a worse default)
+- API change (different defaults, different label distribution)
+
+### What this does NOT catch
+
+- Drift on real-world traffic (golden set is fixed in time)
+- Cost regressions (no token budget gate; future phase if needed)
+- Latency regressions (no p95 gate; modelserver has its own latency story)
+
+### Quantified outcome
+
+- Golden set size: 25 examples (7/7/6/5 across bug/feature/docs/question)
+- Haiku 4.5 floor measurement (Phase 2.4): **macro-F1 1.0000, all per-class 1.0000**
+- Committed thresholds: macro_f1 0.90, per_class_min_f1 0.50
+- Headroom from current floor: 10 macro-F1 points, 50 per-class F1 points
+- CI cost per gate run: ~$0.05
+- Workflow trigger: PRs that touch app/prompts/golden set/eval code or workflow file, plus manual dispatch
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -815,7 +880,6 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 
 Filled in as phases land. Reserved slots:
 
-- **D-013 — Classification eval thresholds in `eval_thresholds.yaml`.** Filled by Phase 2.4.
 - **D-014 — NER and summarization tool choices.** Filled by Phase 2.5.
 - **D-015 — Embedding model and retrieval-quality number vs at least one alternative.** Filled by Phase 3.1.
 - **D-016 — Chunking strategy.** Filled by Phase 3.2.
