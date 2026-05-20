@@ -88,3 +88,12 @@ Checklist.md
 backend/notebooks/wandb/
 # W&B local run logs
 backend/notebooks/wandb/
+
+# RAG corpus — built reproducibly from scripts/build_rag_corpus.py
+backend/data/rag_corpus/docs/
+backend/data/rag_corpus/issues/
+# Keep the manifest
+!backend/data/rag_corpus/manifest.json
+
+# scikit-learn clone for docs extraction
+backend/data/scikit-learn-clone/
