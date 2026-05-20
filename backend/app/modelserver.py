@@ -130,12 +130,12 @@ def _load_artifacts(
         id2label=dict(enumerate(LABELS)),
         label2id={lbl: i for i, lbl in enumerate(LABELS)},
     )
-    model = AutoModelForSequenceClassification.from_config(config)  # type: ignore
+    model = AutoModelForSequenceClassification.from_config(config)  # type: ignore[no-untyped-call]
     model.load_state_dict(torch.load(weights_path, map_location="cpu"))
     model.eval()
 
     logger.info("classifier model loaded into memory")
-    return model, tokenizer, card  # type: ignore
+    return model, tokenizer, card  # type: ignore[return-value]
 
 
 @asynccontextmanager
@@ -200,16 +200,16 @@ async def healthz() -> dict[str, str]:
 @app.post("/classify", tags=["inference"], response_model=ClassifyResponse)
 async def classify(request: ClassifyRequest) -> ClassifyResponse:
     """Classify an issue title+body into one of bug/feature/docs/question."""
-    model: AutoModelForSequenceClassification = app.state.model
-    tokenizer: AutoTokenizer = app.state.tokenizer
-    device: torch.device = app.state.device
+    model = app.state.model
+    tokenizer = app.state.tokenizer
+    device = app.state.device
 
     text = request.title.strip()
     if request.body:
         text = f"{text}\n\n{request.body.strip()}"
 
     try:
-        tokens = tokenizer(  # type: ignore
+        tokens = tokenizer(
             text,
             return_tensors="pt",
             truncation=True,
@@ -217,7 +217,7 @@ async def classify(request: ClassifyRequest) -> ClassifyResponse:
             padding=False,
         ).to(device)
         with torch.no_grad():
-            logits = model(**tokens).logits  # type: ignore
+            logits = model(**tokens).logits
             probs = torch.softmax(logits, dim=-1)[0].tolist()
     except Exception as exc:
         logger.exception("classify failed")

@@ -381,6 +381,72 @@ Rationale: 0.60 is below the model's actual performance but above the "random th
 - CPU inference in production (modelserver doesn't have GPU passthrough). Latency p50 expected ~30-100ms per inference on 256-token input. Phase 2.4 measures and confirms.
 - Artifact storage in /tmp inside the container. Each restart re-downloads from MinIO (~270MB, ~5 seconds inside the docker network). Acceptable for a 5-day project; a persistent volume would eliminate the round-trip cost in production.
 
+
+## D-010: Classical ML Baseline — TF-IDF + LogisticRegression
+
+Status: Accepted
+Date: 2026-05-20
+
+### Context
+
+The brief grades the *three-way comparison* (classical / fine-tuned / LLM) more than any single classifier's quality. Without a classical baseline, we have no calibration point — DistilBERT's 0.7462 macro-F1 on test is meaningless without a "what could a 10-line scikit-learn pipeline do?" reference.
+
+### Decision
+
+Train a TF-IDF + linear classifier pipeline on the same `data/issues/splits/{train,val,test}.jsonl` files the fine-tuned encoder used. Vectorizer: `TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_df=0.95, sublinear_tf=True)`. Compare two linear classifiers on val, pick winner, evaluate ONCE on test.
+
+Two classifiers compared:
+
+| Classifier | Val macro-F1 | Notes |
+|---|---|---|
+| `LogisticRegression(solver="lbfgs", C=1.0, class_weight="balanced")` | **0.6473** | winner |
+| `LinearSVC(C=1.0, class_weight="balanced", dual="auto")` | 0.6261 | runner-up |
+
+LogisticRegression won and was evaluated on test. The artifacts (`vectorizer.pkl` + `classifier.pkl` + `comparison_report.json`) live in `backend/data/classical_baseline_artifacts/`. They are *not* pushed to MinIO or wired into `modelserver` — the classical baseline exists as a comparison artifact only.
+
+### Why TF-IDF + linear classifier (vs more elaborate options)
+
+- The brief asks for a *baseline*, not a competitive ensemble. The simplest reasonable approach is what's wanted: it's the one that earns the comparison-anchor role honestly.
+- TF-IDF with word + bigram features captures the lexical signal scikit-learn's labels reflect ("fit fails" / "documentation" / "feature request") without preprocessing tricks.
+- Linear classifiers on TF-IDF are within 1-2% of more complex non-neural methods on this kind of dataset shape, so spending more here wouldn't change the headline number meaningfully.
+
+### Why solver="lbfgs", not "liblinear"
+
+scikit-learn's `liblinear` solver doesn't support multi-class natively (one-vs-rest only). `lbfgs` handles our 4-class problem via multinomial logistic regression — the right default for 4+ classes.
+
+### Why `class_weight="balanced"`
+
+Mirrors the DistilBERT setup. Without it, both classical models over-predict `bug` (it's 38% of the training set, while `question` is 7%). Balancing makes the comparison fair: both approaches operate under the same imbalance correction.
+
+### Result on test (same splits as Phase 2.1)
+
+| Metric | DistilBERT | LogReg (classical) | Delta |
+|---|---|---|---|
+| Test accuracy | 0.8478 | 0.8201 | -0.0277 |
+| Test macro-F1 | 0.7462 | 0.6977 | **-0.0485** |
+| F1 bug | 0.9255 | 0.8961 | -0.0294 |
+| F1 feature | 0.8148 | 0.7826 | -0.0322 |
+| F1 docs | 0.8845 | 0.8562 | -0.0283 |
+| F1 question | 0.3600 | 0.2558 | -0.1042 |
+
+DistilBERT wins on every class, by 5 macro-F1 points overall — a real but not overwhelming margin. The biggest improvement comes from the `question` class, where DistilBERT's contextual embeddings extract more signal than TF-IDF's bag-of-n-grams can. On the well-labeled classes (`bug`, `feature`, `docs`), classical TF-IDF captures most of the easy lexical signal — fine-tune contributes a 3-4 point improvement per class.
+
+### Trade-offs / what this teaches us
+
+- **The fine-tune cost is justified, modestly.** DistilBERT is meaningfully better but not by a runaway gap. If GPU were unavailable or our training set were 10x smaller, the classical baseline at 0.6977 macro-F1 would be a reasonable production choice on its own.
+- **`question` is the class where deep learning genuinely helps.** This is the result that gives Phase 2.3 (LLM baseline) its purpose — Claude is expected to outperform both on this noisy class because it can reason about question-shaped text without needing maintainer-provided labels to be perfect.
+- **W&B run logged**: see `classical-baseline-{timestamp}` in the `maintainer-copilot` project.
+
+### Quantified outcome (Phase 2.2)
+
+- Vocabulary size: 42,225 (word + bigram, after min_df=2 filtering)
+- Train time: <5 seconds (both models combined)
+- Test accuracy: 0.8201
+- Test macro-F1: 0.6977
+- Per-class F1: bug 0.8961 / feature 0.7826 / docs 0.8562 / question 0.2558
+- Artifacts: `data/classical_baseline_artifacts/{vectorizer.pkl,classifier.pkl,comparison_report.json}`
+
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -622,7 +688,6 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 
 Filled in as phases land. Reserved slots:
 
-- **D-010 — Classical ML baseline pipeline.** Filled by Phase 2.2.
 - **D-011 — LLM classification baseline (prompt, structured output strategy, latency/cost budget).** Filled by Phase 2.3.
 - **D-012 — Three-way classifier comparison and deployment choice.** Filled by Phase 2.3.
 - **D-013 — Classification eval thresholds in `eval_thresholds.yaml`.** Filled by Phase 2.4.

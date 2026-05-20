@@ -188,6 +188,8 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/DECISIONS.md` D-010, `deliverables/EVALS.md` §1.
 
+- [x] Phase 2.2 - done
+
 #### Phase 2.3 · LLM baseline + three-way comparison
 
 - Claude classification baseline using structured output (e.g. tool use returning the label). Prompt versioned under `app/prompts/`.
