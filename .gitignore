@@ -83,3 +83,8 @@ Thumbs.db
 desktop.ini
 
 Checklist.md
+
+# W&B local run logs
+backend/notebooks/wandb/
+# W&B local run logs
+backend/notebooks/wandb/
