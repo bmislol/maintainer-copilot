@@ -639,6 +639,57 @@ The `per_class_min_f1: 0.50` is a separate gate — even if macro stays high, a 
 - CI cost per gate run: ~$0.05
 - Workflow trigger: PRs that touch app/prompts/golden set/eval code or workflow file, plus manual dispatch
 
+
+## D-014: NER and Summarizer — Implementation Choices
+
+Status: Accepted
+Date: 2026-05-20
+
+### Context
+
+Phase 2.5 requires two model-backed tools behind modelserver. The brief lists NER and summarization. We must defend the model choice for each.
+
+### Decisions
+
+**NER**: `dslim/bert-base-NER`, loaded from HuggingFace Hub directly on modelserver startup. Pre-trained CoNLL-03 (4-class: PER, LOC, ORG, MISC). CPU inference via `transformers.pipeline(task="token-classification", aggregation_strategy="simple")`. We pass the canonical pipeline task name `"token-classification"` rather than the friendly alias `"ner"` so the call matches the typed overload in transformers' type stubs at mypy time; both are equivalent at runtime. Latency: ~50-100ms per call.
+
+**Summarizer**: Anthropic Haiku 4.5, called via the Anthropic SDK from modelserver. No local model.
+
+### Why no MinIO for NER weights
+
+The artifact-contract pattern (D-009, refuse-to-boot on SHA mismatch) has real meaning for the *fine-tuned* DistilBERT — we trained those weights, we own the hash, the SHA is a contract about our work. The NER model is third-party public weights. Pushing it to MinIO and hashing it against itself would be theater; we'd be verifying that someone else's published model matches itself. We chose to load it directly from HF Hub instead.
+
+This means:
+- NER startup depends on HF Hub availability (acceptable: hub is well-monitored, no real outage risk)
+- NER weights are not air-gappable (acceptable: project is single-tenant developer-side)
+- If air-gap deployment ever became required, the model would be downloaded once and pushed to MinIO as a Phase 5 task
+
+### Why Claude for summarization (not a local model)
+
+Phase 2.3 (D-012) measured Haiku 4.5 beating DistilBERT on classification at $1.84/1k issues. Summarization is a *generation* task where small models do worse than discriminative tasks, while large language models do better. Extrapolating the cost-quality argument: a local summarizer like `sshleifer/distilbart-cnn-12-6` would produce worse output at significantly higher CPU cost than Haiku's ~$0.001 per summarization call.
+
+Specific reasons:
+- Haiku produces 2-3 sentence summaries that are immediately useful; small summarizers tend to copy phrases from the input
+- Haiku follows the system prompt's instruction to focus on (a) what's happening, (b) what's affected, (c) what the user wants
+- Local summarizer would add ~500MB to modelserver disk + ~250ms CPU per call
+
+This is *not* "LLMs are always better" — it's "for this specific generation task at our scale, the cost-quality numbers favor the LLM."
+
+### Implementation
+
+Both endpoints live in `modelserver` to honor "two model-backed tools behind modelserver" literally. The summarizer is a thin proxy that calls Claude; the NER endpoint runs the model locally. Both expose the same shape: typed request, typed response, FastAPI validation.
+
+API contracts:
+POST /ner          {text} → {entities: [{label, text, start, end, score}], model: "dslim/bert-base-NER"}
+POST /summarize    {text} → {summary, original_chars, summary_chars, model: "claude-haiku-4-5"}
+
+### Trade-offs
+
+- NER depends on HF Hub at boot; failure mode is "modelserver refuses to boot on NER load failure" — defended in RUNBOOK §2.
+- Summarizer requires `secrets.anthropic.api_key` to be valid. Same boot-time check as Vault and Langfuse credentials.
+- Latency contract: NER 50-100ms (CPU); summarize 500-1500ms (Anthropic API).
+- No automated quality evaluation on either tool. The chatbot's Phase 4.2 tool calls will exercise them; Phase 3.4's RAG golden set covers a different surface.
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -880,7 +931,6 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 
 Filled in as phases land. Reserved slots:
 
-- **D-014 — NER and summarization tool choices.** Filled by Phase 2.5.
 - **D-015 — Embedding model and retrieval-quality number vs at least one alternative.** Filled by Phase 3.1.
 - **D-016 — Chunking strategy.** Filled by Phase 3.2.
 - **D-017 — Hybrid retrieval weighting.** Filled by Phase 3.3.
