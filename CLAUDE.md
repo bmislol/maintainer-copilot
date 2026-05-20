@@ -220,6 +220,8 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/DECISIONS.md` D-014, `deliverables/ARCH.md` §2.
 
+- [x] Phase 2.5 - done
+
 ---
 
 ### Section 3 — Advanced RAG (Wednesday) · 5 phases

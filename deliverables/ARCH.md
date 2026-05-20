@@ -219,6 +219,14 @@ backend/app/eval/classification/run_eval.py
 | per_class_f1 | bug 0.9255, feature 0.8148, docs 0.8845, question 0.3600 |
 | trained_at | 2026-05-19 (W&B run 6vaoq2zd) |
 
+### 10.2 NER and Summarizer Artifacts (Phase 2.5)
+
+NER model: `dslim/bert-base-NER` is fetched from HuggingFace Hub directly at modelserver startup. No MinIO involvement — defended in D-014: third-party public weights have no meaningful SHA-against-self contract.
+
+Summarizer: no model artifact; calls Anthropic Haiku via the SDK. Authentication is the existing `secrets.anthropic.api_key` from Vault.
+
+The artifact contract pattern (refuse-to-boot on SHA mismatch from D-009) applies to fine-tuned models only. Third-party loaded models refuse to boot if HF Hub is unreachable, but not on hash verification.
+
 ## 11. RAG Architecture
 
 | Concern | Choice | Filled by |

@@ -110,6 +110,12 @@ sleep 10
 docker compose up -d api
 ```
 
+modelserver downloads `classifier.pt`, `tokenizer/`, and `model_card.json` from MinIO at startup. It refuses to boot if:
+1. MinIO is unreachable.
+2. The downloaded `classifier.pt` SHA-256 does not match `model_card.json`.
+3. `test_macro_f1` in `model_card.json` is below the committed threshold (0.60).
+4. **The NER model `dslim/bert-base-NER` cannot be loaded from HuggingFace Hub.** *(Phase 2.5)*
+
 ## 3. Bootstrap the First Admin User
 
 Filled by Phase 4.1.

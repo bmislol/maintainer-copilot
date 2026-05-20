@@ -147,6 +147,30 @@ On every push to `main` and every pull request:
 5. Upload `eval_report.json` as a CI artifact and to MinIO.
 6. Fail the job if any threshold regresses.
 
+
+### 2. NER and Summarization (Phase 2.5)
+
+NER (`POST /ner`):
+- Model: dslim/bert-base-NER (CoNLL-03 4-class: PER, LOC, ORG, MISC)
+- Inference: CPU, ~50-100ms per call
+- Input limit: 5000 chars
+- Output schema: {entities: [{label, text, start, end, score}]}
+- Quality eval: not measured in Phase 2.5; the chatbot's tool use in Phase 4.2 exercises real-world quality
+
+Summarization (`POST /summarize`):
+- Model: Anthropic Haiku 4.5
+- Inference: API call, ~500-1500ms per call
+- Input limit: 10,000 chars (~2500 tokens)
+- Output: 2-3 sentences (max 60 words per system prompt)
+- Cost: ~$0.001 per summary
+- Quality eval: not measured in Phase 2.5; relies on Phase 2.3's measurement that Haiku is a good LLM at this price point
+
+Both endpoints rely on existing modelserver refuse-to-boot conditions (D-009, D-014). NER refuses to boot if HF Hub is unreachable. Summarize refuses to boot if Anthropic credentials in Vault are invalid (same path as the classify endpoint).
+
+**Smoke test (Phase 2.5 closeout):** NER on the input "sklearn 1.4 RandomForestClassifier fails on sparse input from NumPy arrays in Python 3.12" returned 4 entities: 3 MISC (RandomF, NumP, Python) and one sub-token (##C). Sub-token splitting at the boundary is a known quirk of the WordPiece tokenizer with `aggregation_strategy="simple"`; refinement to `aggregation_strategy="max"` would help if extraction quality becomes a chatbot concern. Phase 4.2 will surface the answer in real use.
+
+Summarize on a 451-char issue about a RandomForestClassifier sparse-input regression returned a 253-char two-sentence summary correctly capturing (a) what's failing, (b) where, (c) the user's question. ~44% compression. Latency was ~1.2s end to end.
+
 ---
 
 ## 3. Redaction Test (Separate CI Job)
