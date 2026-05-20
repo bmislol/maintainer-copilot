@@ -199,6 +199,8 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/DECISIONS.md` D-011, D-012, `deliverables/EVALS.md` §1.
 
+- [x] Phase 2.3 - done
+
 #### Phase 2.4 · Classification golden set + CI gate
 
 - 25-example golden set hand-curated, **not** drawn from train/val/test.
