@@ -19,9 +19,8 @@ class MemoryLong(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     content: Mapped[str] = mapped_column(String, nullable=False)
-    # Embedding dim is decided in Phase 3.1 (embedding model choice). Default 1536
-    # matches text-embedding-3-small; will be tightened in 3.1.
-    embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=False)
+    # 384-dim: locked by D-015 (sentence-transformers/all-MiniLM-L6-v2).
+    embedding: Mapped[list[float]] = mapped_column(Vector(384), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

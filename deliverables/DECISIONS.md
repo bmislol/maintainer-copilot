@@ -743,6 +743,107 @@ The proxy benchmark does not include chunking (Phase 3.2) or reranking (Phase 3.
 
 ---
 
+## D-016: Chunking Strategy, pgvector Schema, and Retrieval Baseline
+
+Status: Accepted
+Date: 2026-05-20
+
+### Context
+
+Phase 3.2 requires chunking the 641-item flat corpus into sub-document units
+so that dense retrieval can surface specific passages rather than entire docs.
+We need a chunking strategy, a pgvector schema, and a retrieval baseline number
+that Phase 3.3 (BM25 + rerank) must beat.
+
+### Decision
+
+**Chunking strategy: structural, with sliding-window fallback.**
+
+- **RST docs** — split at section headings (title line followed by an underline
+  of equal length made of a single RST punctuation character: `= - ~ ^ _ * + #`).
+  Headings are natural semantic boundaries already authored by the docs team;
+  they preserve section context (`section_title` in metadata) without an
+  external NLP model.
+- **Issues** — body as chunk 0, each comment as its own chunk. GitHub issue
+  threads are already naturally segmented: the OP states the problem, comments
+  provide diagnosis and fix.
+- **Sliding-window fallback** — any section or body exceeding MAX_TOKENS is
+  re-split with stride 170 (220-token window, 50-token overlap). Rationale:
+  MiniLM's `max_seq_length = 256` subword tokens; a 220-token cap leaves a
+  36-token margin preventing silent truncation. Stride 170 (50-token overlap,
+  23% of window) is the "25% overlap" heuristic — enough cross-boundary
+  context for BM25 term matching in Phase 3.3 without tripling chunk counts.
+  Compared to 200/30 (same stride = 170, smaller window): 220/50 captures 10%
+  more context per chunk at the same chunk-count cost.
+- **Comment truncation** — first 300 tokens of each comment preserved.
+  Assumption: the first paragraph of a maintainer comment contains the
+  substantive answer (diagnosis, workaround, or pointer to a fix). Phase 3.4
+  eval will validate this assumption empirically against the 25-triple golden
+  set. Comments may slightly exceed MiniLM's effective window (256 tokens);
+  the last ~44 tokens are silently truncated by the model, but the first-paragraph
+  assumption means the relevant content is captured.
+
+**pgvector schema — `rag_chunks` table:**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | random |
+| `chunk_id` | TEXT UNIQUE | `{source_type}:{source_id}:{chunk_index}` — deterministic, idempotent re-index |
+| `source_type` | VARCHAR(16) | `"doc"` or `"issue"` |
+| `source_id` | VARCHAR(256) | `file_id` for docs, `str(number)` for issues |
+| `chunk_index` | INT | position within source |
+| `text` | TEXT | chunk text |
+| `embedding` | vector(384) | MiniLM-L6-v2, L2-normalized |
+| `n_tokens` | INT | from `AutoTokenizer.from_pretrained(model)` — actual count from decoded text |
+| `metadata` | JSONB | `section_title`, `issue_id`, `window` (for fallback chunks) |
+| `created_at` | TIMESTAMPTZ | server `now()` |
+
+Indexes:
+- HNSW on `embedding` (`m=16`, `ef_construction=64`) — pgvector defaults; sufficient for the ~10 k-chunk corpus. Tunable in Phase 3.4 if recall@5 falls short on the golden set.
+- Composite btree on `(source_type, source_id)` — supports filtering by source.
+- GIN on `metadata` — supports Phase 3.3 metadata filtering.
+
+**Alternatives rejected:**
+
+- **Semantic chunking (NLP-based sentence segmentation)** — ignores RST
+  structural signals that are already semantically meaningful; non-deterministic
+  output; would fail to split long sections that a section heading cleanly
+  delineates. Rejected.
+- **Late chunking (JinaAI model)** — requires a different embedding model
+  (jina-embeddings-v3); incompatible with MiniLM selected in D-015. Would
+  require re-running D-015 benchmark. Rejected.
+- **Fixed-size chunking (naïve)** — ignores heading boundaries; splits at
+  arbitrary token boundaries that cut code blocks and RST directives mid-entry.
+  Rejected.
+
+### Numbers
+
+Corpus: 176 docs + 465 issues → **9,701 chunks** (docs=4,846, issues=4,855).
+Indexing time: 58.8s (chunking + embedding + upsert).
+
+**Phase 3.2 baseline retrieval (18-query proxy set, same as Phase 3.1):**
+
+| Metric | Phase 3.1 (flat corpus, no chunking) | Phase 3.2 (structural chunks) | Delta |
+|---|---|---|---|
+| hit@1 | 55.56% (10/18) | **83.33% (15/18)** | +27.8 pp |
+| hit@5 | 88.89% (16/18) | **94.44% (17/18)** | +5.6 pp |
+
+Structural chunking improved hit@1 by 27.8 pp and hit@5 by 5.6 pp over the
+flat-corpus baseline. The hit@5 number (94.44%) is the anchor that Phase 3.3
+(BM25 + rerank) must beat.
+
+### Trade-offs
+
+- **Accept**: n=18 proxy set; one query moves the number by 5.5 pp. Phase 3.4
+  golden set (25 triples) is the authoritative measurement.
+- **Accept**: comment truncation at 300 tokens slightly exceeds MiniLM's
+  256-token window; last ~44 tokens are discarded by the model. First-paragraph
+  assumption mitigates this; validated empirically in Phase 3.4.
+- **Gain**: structural chunking requires no external NLP model; reproducible
+  and fast (chunking completes in <5s for 641 items).
+
+---
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -985,7 +1086,7 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 Filled in as phases land. Reserved slots:
 
 - **D-015 — Corpus composition, comment enrichment, and embedding model.** ✅ Filled by Phase 3.1.
-- **D-016 — Chunking strategy.** Filled by Phase 3.2.
+- **D-016 — Chunking strategy, pgvector schema, retrieval baseline.** ✅ Filled by Phase 3.2.
 - **D-017 — Hybrid retrieval weighting.** Filled by Phase 3.3.
 - **D-018 — Reranker choice.** Filled by Phase 3.3.
 - **D-019 — Query transformation technique.** Filled by Phase 3.3.

@@ -233,8 +233,8 @@ The artifact contract pattern (refuse-to-boot on SHA mismatch from D-009) applie
 |---|---|---|
 | Corpus | 176 scikit-learn `.rst` docs (tag `1.6.0`) + 465 closed issues with maintainer comment threads (2024-09 → 2026-05). Strict separation from classifier splits. | Phase 3.1 (D-015) |
 | Embedding model | `sentence-transformers/all-MiniLM-L6-v2` — 384 dim, tied hit@5 with `BAAI/bge-base-en-v1.5` (88.89% on 18-query proxy set) at 7.5× lower encode latency. | Phase 3.1 (D-015) |
-| Chunking strategy | Not naive fixed-size. TBD. | Phase 3.2 (D-016) |
-| Vector store | pgvector | Phase 3.2 |
+| Chunking strategy | Structural: RST docs split at section headings; issues split body + per-comment. Sliding-window fallback at 220 tokens / 50-token overlap. 641 items → 9,701 chunks (docs=4,846, issues=4,855). | Phase 3.2 (D-016) |
+| Vector store | pgvector `rag_chunks` table — `vector(384)`, HNSW index (m=16, ef_construction=64), GIN on metadata JSONB. Baseline: hit@1=83.33%, hit@5=94.44% (18-query proxy set). | Phase 3.2 (D-016) |
 | Sparse retrieval | BM25 | Phase 3.3 |
 | Dense + sparse weighting | TBD (tuned on golden set) | Phase 3.3 (D-017) |
 | Reranker | Cross-encoder (TBD model) | Phase 3.3 (D-018) |
