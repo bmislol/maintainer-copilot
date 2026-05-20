@@ -210,6 +210,8 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 **Deliverables updated:** `deliverables/DECISIONS.md` D-013, `deliverables/EVALS.md` §1.4–§1.5.
 
+- [x] Phase 2.4 - done
+
 #### Phase 2.5 · NER + summarizer
 
 - NER tool: spaCy or a HF token classifier, fronted by a `modelserver` endpoint.

@@ -179,10 +179,9 @@ The compose boot sequence is:
 6. `modelserver`, `api`, `chatbot`, `widget`, `host` start.
 
 The `api` refuses to boot if any of the following are true:
-
 - Vault is unreachable. *(implemented in Phase 1.4)*
 - The Langfuse tracing backend is unreachable or rejects credentials. *(implemented in Phase 1.5)*
-- Any committed eval threshold in `eval_thresholds.yaml` is set to zero or disabled. *(Phase 2.4)*
+- Any committed eval threshold in `backend/eval_thresholds.yaml` is zero or missing. *(implemented in Phase 2.4)*
 
 The `modelserver` refuses to boot if:
 

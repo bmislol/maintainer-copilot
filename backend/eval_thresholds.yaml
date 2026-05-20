@@ -1,0 +1,20 @@
+# Eval gate thresholds for CI.
+# Committed values are floors — if a future change drops Haiku's golden-set
+# macro-F1 below these, CI fails red. Updated only when raising the floor
+# (raising = harder to break the build = better engineering).
+#
+# Defended in:
+#   - DECISIONS D-013 (classification thresholds)
+#   - DECISIONS D-021 (RAG thresholds — Phase 3.4)
+
+classification:
+  # Haiku 4.5 against the 25-example hand-curated golden set.
+  # Committed at 0.85 macro-F1 (current Haiku floor is well above this;
+  # see D-013 for the actual measured number).
+  macro_f1: 0.90
+  per_class_min_f1: 0.50   # no single class may drop below this
+
+rag:
+  # Phase 3.4 will populate.
+  hit_at_5: 0
+  reciprocal_rank: 0

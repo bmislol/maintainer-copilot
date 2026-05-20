@@ -48,6 +48,22 @@ The `modelserver` refuses to boot if:
 - Weights' SHA-256 does not match `model_card.json`.
 - `test_macro_f1` in `model_card.json` is below the committed startup threshold.
 
+**Manually proving eval-threshold refuse-to-boot:**
+
+```bash
+# Temporarily zero out a threshold
+sed -i 's/macro_f1: 0.90/macro_f1: 0/' backend/eval_thresholds.yaml
+
+docker compose restart api
+docker compose logs api --tail=15
+# Expect: "REFUSING TO BOOT: backend/eval_thresholds.yaml has classification.macro_f1=0 (must be > 0)"
+# api container in Exited (3) state.
+
+# Restore
+sed -i 's/macro_f1: 0/macro_f1: 0.90/' backend/eval_thresholds.yaml
+docker compose up -d api
+```
+
 Troubleshooting commands:
 
 ```bash
@@ -138,6 +154,23 @@ docker compose down -v
 ```
 
 After a reset, re-run the first-time startup (Section 1) and the admin bootstrap (Section 3).
+
+### Classification eval gate (Phase 2.4)
+
+Run from `backend/`:
+
+```bash
+set -a; source ../.env; set +a
+uv run pytest -m eval -v -s
+```
+
+Cost: ~$0.05 per invocation against Anthropic API. Skip in regular development; the CI workflow runs it automatically on path-relevant PRs.
+
+For local Anthropic-free runs (skip the gate test):
+
+```bash
+uv run pytest        # default skips @pytest.mark.eval
+```
 
 ## 6. Demo Flow (Friday)
 
