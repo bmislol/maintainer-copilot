@@ -690,6 +690,59 @@ POST /summarize    {text} → {summary, original_chars, summary_chars, model: "c
 - Latency contract: NER 50-100ms (CPU); summarize 500-1500ms (Anthropic API).
 - No automated quality evaluation on either tool. The chatbot's Phase 4.2 tool calls will exercise them; Phase 3.4's RAG golden set covers a different surface.
 
+## D-015: Corpus Composition, Comment Enrichment, and Embedding Model
+
+Status: Accepted
+Date: 2026-05-20
+
+### Context
+
+Phase 3.1 requires building the RAG corpus and choosing an embedding model backed by a retrieval-quality number against at least one alternative. The corpus has two source types: (1) official scikit-learn documentation, (2) resolved GitHub issues that include maintainer answers in their comment threads. The Phase 1.6 GraphQL fetch did not include comments, so we needed a separate enrichment step. The embedding model is the most impactful single-component choice before chunking because it determines the quality ceiling of dense retrieval; the decision must be defended with a measured number.
+
+### Decision
+
+**Corpus:**
+- **Docs**: 176 `.rst` files from scikit-learn `doc/` at tag `1.6.0` (fragments < 200 chars excluded). Pinned ref is committed in `build_rag_corpus.py::CLONE_REF`.
+- **Issues**: 465 closed issues fetched by `fetch_issue_comments.py`, capped at the 500 most-recently-closed issues not appearing in any classifier split (train/val/test). 35 of the 500 were skipped because the live GraphQL response returned zero comments — they had nothing useful for RAG.
+- **Strict separation**: the 3,844 issue IDs in train+val+test are excluded from candidates before the fetch, eliminating cross-contamination between the classifier and the RAG corpus.
+- **Scope cut defended**: fetching all 6,730 eligible issues would take ~110 minutes. The 500 most-recent issues cover 2024-09-23 through 2026-05-19, reflecting current API behaviour and active maintainer patterns. 465 issues is ample for a corpus alongside 176 docs (641 items total). No quality degradation expected from the cut — relevance in a triage chatbot is query-specific, not correlated with corpus size past a few hundred representative items.
+
+**Comment enrichment strategy:** Unconditional fetch per issue (no pre-filter on comment count), write only if `len(comments) >= 1`. The Phase 1.6 cache (`gql_batch_*.json`) contains no comment-count field, so any pre-filter would silently drop all candidates. Fetching unconditionally and skipping on empty is the simplest approach with no wasted API calls: issues with zero comments are correctly excluded post-fetch. GitHub GraphQL costs ~1 point per issue; 500 issues consumed ~500/5000 of the hourly budget. Wall time: 4m28s at ~1.86 req/s.
+
+**Embedding model: `sentence-transformers/all-MiniLM-L6-v2`**
+
+### Why
+
+Proxy benchmark (18 hand-written queries, corpus of 641 items, no chunking):
+
+| Model | hit@1 | hit@5 | Corpus encode | Dim | Approx size |
+|---|---|---|---|---|---|
+| `BAAI/bge-base-en-v1.5` | 55.56% (10/18) | 88.89% (16/18) | 7.5 s | 768 | ~438 MB |
+| `sentence-transformers/all-MiniLM-L6-v2` | 55.56% (10/18) | 88.89% (16/18) | 1.0 s | 384 | ~86 MB |
+
+The models are tied on retrieval quality — both achieve 88.89% hit@5 and 55.56% hit@1 on the proxy set. The two failures are on *different* queries: BGE misses "multi-label metrics" and "speed up sklearn predictions"; MiniLM misses "custom transformer for Pipeline" and "GridSearchCV hyperparameter tuning". Neither model dominates on the hard queries.
+
+Given identical measured quality, the tiebreaker is latency and storage:
+- MiniLM encodes the corpus **7.5× faster** (1.0 s vs 7.5 s) — directly reduces chatbot response latency on the retrieval hot path.
+- MiniLM's 384-dim vectors use **half the pgvector storage** and halve the inner-product cost per query.
+- MiniLM's model file is ~5× smaller (~86 MB vs ~438 MB), reducing modelserver boot time and RAM.
+
+The proxy benchmark does not include chunking (Phase 3.2) or reranking (Phase 3.3). After chunking, corpus size grows ~5–10× and per-query latency becomes dominated by the embedding call; the 7.5× encode gap widens in absolute terms. Reranking will recover quality on the queries both models currently miss.
+
+### Alternatives Considered
+
+- `BAAI/bge-base-en-v1.5`: identical hit@5; 7.5× slower encode; 2× pgvector cost. No quality argument to justify the cost.
+- `text-embedding-3-small` (OpenAI): strong on MTEB but violates D-003 (Anthropic-only LLM provider). Excluded.
+- `BAAI/bge-large-en-v1.5`: larger capacity but ~1 GB; not measurably better on this domain-specific corpus (not benchmarked — proxy set too small to justify the load time difference).
+
+### Trade-offs
+
+- **Accept**: 384 dims may underperform 768-dim models on very long chunks or highly abstract queries. Mitigated by reranking in Phase 3.3.
+- **Accept**: proxy benchmark uses 18 queries — small enough that one misclassified query moves the number by 5.5 pp. The Phase 3.4 golden set (25 queries with human labels) is the authoritative measurement.
+- **Gain**: fast encode, small index, lightweight model — all directly benefit streaming chatbot UX and container footprint.
+
+---
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -931,7 +984,7 @@ If Langfuse is temporarily unreachable during a deploy/restart, api will refuse 
 
 Filled in as phases land. Reserved slots:
 
-- **D-015 — Embedding model and retrieval-quality number vs at least one alternative.** Filled by Phase 3.1.
+- **D-015 — Corpus composition, comment enrichment, and embedding model.** ✅ Filled by Phase 3.1.
 - **D-016 — Chunking strategy.** Filled by Phase 3.2.
 - **D-017 — Hybrid retrieval weighting.** Filled by Phase 3.3.
 - **D-018 — Reranker choice.** Filled by Phase 3.3.
