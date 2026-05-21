@@ -107,39 +107,48 @@ The audit log itself is read-only over HTTP (admin-only) and append-only at the 
 
 ## 7. Redaction Layer
 
-A single redaction module at `app/infra/redaction.py` runs before any string leaves a service boundary. It is called by:
+Last updated: 2026-05-21 (Phase 3.5 / D-022)
 
-- the structured logger before emitting a log line,
-- the Langfuse adapter before attaching span input/output attributes,
-- the long-term memory writer before persisting embedded text,
-- the short-term memory writer before persisting recent turns.
+A single redaction module at `app/infra/redaction.py` exposes one function: `redact(text: str) -> str`. It is called before any string crosses a service boundary:
+
+- **Structured logger** — `RedactionFilter` is attached to the root `StreamHandler` in `app/core/logging.py::configure_logging()`. The filter mutates `record.msg` in-place before the `JSONFormatter` runs, so every log line — whether emitted by the `api` service or any child logger — is redacted. (Filter is on the handler, not the root logger; see D-022 for why handler attachment is required.)
+- **Langfuse adapter** — `app/infra/tracing.py::redact_metadata()` wraps every `metadata=` dict passed to `langfuse.trace()` and `langfuse.span()` calls. String values are redacted; non-string values are unchanged.
+- **Long-term memory writer** — will call `redact()` on the text field before the pgvector `INSERT` (Phase 4.3).
+- **Short-term memory writer** — will call `redact()` on the turn content before the Redis `SETEX` (Phase 4.3).
 
 ### 7.1 Patterns
 
-Pattern list and defense — filled by Phase 3.5. Reserved categories:
+Eight patterns, compiled once at import time, applied in most-specific-first order. Full rationale in D-022.
 
-| Category | Examples |
-|---|---|
-| API keys | OpenAI-style `sk-...`, Anthropic-style `sk-ant-...`, generic high-entropy bearer tokens. |
-| GitHub tokens | `ghp_...`, `gho_...`, `ghs_...`, `github_pat_...`. |
-| AWS keys | `AKIA...`, secret access keys following the standard 40-char pattern. |
-| Signed URLs | Pre-signed S3, MinIO, Azure SAS URLs. |
-| Database URLs | URI form with embedded password. |
-| JWTs | `eyJ...` three-segment base64-url tokens. |
-| Email addresses | Optionally redacted depending on policy; default = preserved with hash. |
+| Pattern | Matches | Notes |
+|---|---|---|
+| `sk-ant-[A-Za-z0-9\-]+` | Anthropic API keys | Placed before generic `sk-` rule |
+| `sk-[A-Za-z0-9\-]{20,}` | Generic `sk-` bearer tokens | Hyphens included; 20-char floor avoids short identifiers |
+| `gh[ps]_[A-Za-z0-9]{36}` | GitHub classic PATs and server tokens | Matches `ghp_` and `ghs_` |
+| `github_pat_[A-Za-z0-9_]{82}` | GitHub fine-grained PATs | 82-char body per GitHub spec |
+| `hvs\.[A-Za-z0-9]+` | HashiCorp Vault service tokens | KV v2 format |
+| `postgresql://[^\s]+` | Postgres DSNs | Entire URI redacted (user+password+host) |
+| `[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}` | JWT tokens | Conservative 3-segment heuristic; 10-char floor avoids version strings |
+| `[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}` | Email addresses (PII) | Redacted per GDPR principle of data minimisation |
 
-The defense for what is in and what is out lives next to the pattern table once Phase 3.5 lands.
+**Intentionally out of scope (deferred until used):** AWS access keys (`AKIA...`), pre-signed URLs (`X-Amz-Signature`, `sig=`). No production path in this project exercises these; adding untested patterns creates false confidence.
 
 ### 7.2 Redaction Test
 
-The CI redaction test sends a chatbot message containing a fake API key (`sk-test-FAKE-not-real`) and asserts that the literal string never appears in:
+`tests/test_redaction.py` — eight tests, all mandatory for CI green:
 
-- structured log output captured during the request,
-- Langfuse trace spans for that request,
-- the short-term Redis entry for the conversation,
-- any long-term memory row written by the turn.
+| Test | What it proves |
+|---|---|
+| `test_anthropic_key_is_redacted` | `sk-test-FAKE-not-real` (the graded mandatory string) never appears unredacted |
+| `test_postgres_dsn_is_redacted` | Full DSN including password field is replaced |
+| `test_clean_text_passes_through` | No false positives on clean prose |
+| `test_log_filter_redacts_in_log_output` | `caplog.text` contains `[REDACTED]`, not the raw key; proves filter is active in the live logging pipeline |
+| `test_github_token_is_redacted` | `ghp_` + 36-char body is caught |
+| `test_vault_token_is_redacted` | `hvs.` prefix token is caught |
+| `test_email_is_redacted` | `user@example.com` is caught |
+| `test_multiple_secrets_in_one_string` | A single string with three different secret types produces ≥ 3 `[REDACTED]` tokens |
 
-If any of those four locations contains the literal, the test fails and merge is blocked.
+The mandatory grading criterion — `sk-test-FAKE-not-real` must never appear unredacted in any output — is enforced by `test_anthropic_key_is_redacted` and `test_log_filter_redacts_in_log_output`.
 
 ## 8. CORS and CSP for the Widget
 

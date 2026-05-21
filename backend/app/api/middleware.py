@@ -9,7 +9,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.logging import request_id_var, trace_id_var
-from app.infra.tracing import get_client
+from app.infra.tracing import get_client, redact_metadata
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -34,11 +34,14 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         if langfuse is not None:
             trace = langfuse.trace(
                 name=f"{request.method} {request.url.path}",
-                metadata={"request_id": request_id},
+                metadata=redact_metadata({"request_id": request_id}),
             )
             trace_id: str = trace.id
         else:
             trace_id = ""
+
+        # Expose on request.state so exception handlers can read it.
+        request.state.request_id = request_id
 
         # Bind to context so every log line in this request picks them up.
         request_token = request_id_var.set(request_id)

@@ -48,6 +48,29 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+class RedactionFilter(logging.Filter):
+    """Redacts credentials and PII from log messages before emission.
+
+    Attached to the StreamHandler (not the root logger) so it applies to
+    all records routed through that handler, including propagated records
+    from child loggers. Python's propagation calls handlers directly via
+    ``callHandlers()`` without invoking the parent logger's ``handle()``
+    method, which means logger-level filters on the root are bypassed for
+    child logger records. Handler-level filters are not.
+
+    Mutates ``record.msg`` in-place after expanding ``%``-style args so
+    that all downstream formatters (JSONFormatter, pytest caplog, etc.)
+    see the already-redacted string.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from app.infra.redaction import redact
+
+        record.msg = redact(record.getMessage())
+        record.args = ()
+        return True
+
+
 class HealthzFilter(logging.Filter):
     """Drops uvicorn access logs for /healthz.
 
@@ -67,10 +90,18 @@ def configure_logging(service_name: str, level: int = logging.INFO) -> None:
     """
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JSONFormatter(service_name))
+    handler.addFilter(RedactionFilter())
 
     root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(handler)
+    # Remove only handlers we own (identified by JSONFormatter).
+    # Preserves test-framework handlers (e.g. pytest's LogCaptureHandler) so
+    # they stay active after configure_logging() is called mid-test.
+    # Our handler is inserted at index 0 so the RedactionFilter mutates the
+    # LogRecord *before* any subsequent handler (including caplog) reads it.
+    root.handlers = [
+        h for h in root.handlers if not isinstance(getattr(h, "formatter", None), JSONFormatter)
+    ]
+    root.handlers.insert(0, handler)
     root.setLevel(level)
 
     # uvicorn has its own loggers — make sure they go through our handler too.
