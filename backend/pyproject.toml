@@ -33,6 +33,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "fastapi-users[sqlalchemy]>=13.0.0,<14.0.0",
     "bcrypt>=4.0.0",                           # password hashing backend for fastapi-users
+    "sse-starlette>=2.0.0",                    # Server-Sent Events response for /chat/send
 ]
 
 [dependency-groups]

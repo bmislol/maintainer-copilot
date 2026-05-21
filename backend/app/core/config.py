@@ -28,5 +28,9 @@ class BootstrapSettings(BaseSettings):
     # Service port (bind-side, inside container)
     api_port: int = 8000
 
+    # Modelserver — override via MODELSERVER_URL env var for host-side runs
+    # (tests, scripts). Inside compose the default resolves via Docker DNS.
+    modelserver_url: str = "http://modelserver:8001"
+
 
 bootstrap_settings = BootstrapSettings()
