@@ -17,6 +17,7 @@ Run from backend/:
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import time
@@ -116,6 +117,25 @@ QUERIES: list[tuple[str, list[str]]] = [
         ["issue:8370"],
     ),
 ]
+
+
+def _load_eval_file(path: Path) -> list[tuple[str, list[str]]]:
+    """Load a JSONL golden-set file into (query, [source_key]) pairs.
+
+    ground_truth_chunk_id format: "source_type:source_id:chunk_index".
+    We strip the chunk index to get the source_key for hit/MRR matching.
+    """
+    queries: list[tuple[str, list[str]]] = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row: dict[str, str] = json.loads(line)
+        question = row["question"]
+        chunk_id = row["ground_truth_chunk_id"]
+        # "doc:common_pitfalls:8" → "doc:common_pitfalls"
+        source_key = chunk_id.rsplit(":", 1)[0]
+        queries.append((question, [source_key]))
+    return queries
 
 
 def _db_url() -> str:
@@ -281,22 +301,25 @@ def run_benchmark(
     bm25_indexes: dict[str, tuple[BM25Okapi, list[str]]],
     mode: str,
     anthropic_client: Anthropic | None = None,
+    queries: list[tuple[str, list[str]]] | None = None,
 ) -> dict[str, Any]:
-    """Run all 18 queries for a given mode.
+    """Run queries for a given mode.
 
     mode: "dense" | "hybrid" | "reranked" | "hyde"
     anthropic_client: required for mode="hyde".
+    queries: override the default 18-query proxy set (e.g. golden eval file).
     Returns a dict with aggregated metrics and per-query breakdown.
     """
     if mode == "hyde" and anthropic_client is None:
         raise ValueError("anthropic_client is required for mode='hyde'")
+    _queries = queries if queries is not None else QUERIES
     pool_k = 50
 
     h1 = h5 = mrr10_sum = rec10_sum = 0.0
     per_query = []
 
     t0 = time.time()
-    for query, relevant in QUERIES:
+    for query, relevant in _queries:
         q_emb = embed_query(query)
         dense_rows = dense_search(cur, q_emb, k=pool_k)
 
@@ -377,7 +400,7 @@ def run_benchmark(
         )
 
     elapsed = time.time() - t0
-    n = len(QUERIES)
+    n = len(_queries)
     return {
         "mode": mode,
         "n_queries": n,
@@ -420,6 +443,22 @@ def _anthropic_client() -> Anthropic:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Retrieval benchmark")
+    parser.add_argument(
+        "--mode",
+        choices=["dense", "hybrid", "reranked", "hyde"],
+        default=None,
+        help="Run a single mode only (default: run all four)",
+    )
+    parser.add_argument(
+        "--eval-file",
+        type=Path,
+        default=None,
+        dest="eval_file",
+        help="Custom JSONL eval file (default: 18-query proxy set)",
+    )
+    args = parser.parse_args()
+
     url = _db_url()
     conn = psycopg2.connect(url)
     register_vector(conn)
@@ -432,8 +471,15 @@ def main() -> None:
         conn.close()
         raise SystemExit("rag_chunks is empty — run scripts/index_corpus.py first")
 
+    queries: list[tuple[str, list[str]]] | None = None
+    eval_label = "proxy-18"
+    if args.eval_file is not None:
+        queries = _load_eval_file(args.eval_file)
+        eval_label = str(args.eval_file)
+
+    n_queries = len(queries) if queries is not None else len(QUERIES)
     print(f"rag_chunks rows : {total_chunks}")
-    print(f"Queries         : {len(QUERIES)}")
+    print(f"Queries         : {n_queries}  ({eval_label})")
     print()
 
     print("Loading BM25 indexes …")
@@ -443,60 +489,63 @@ def main() -> None:
     )
     print()
 
-    dense_res = run_benchmark(cur, bm25_indexes, mode="dense")
-    hybrid_res = run_benchmark(cur, bm25_indexes, mode="hybrid")
+    modes_to_run: list[str] = [args.mode] if args.mode else ["dense", "hybrid", "reranked", "hyde"]
+    anthropic_client: Anthropic | None = None
+    if "hyde" in modes_to_run:
+        anthropic_client = _anthropic_client()
 
-    print("Warming up cross-encoder reranker …")
-    reranked_res = run_benchmark(cur, bm25_indexes, mode="reranked")
-
-    print("Running HyDE augment benchmark (calls Anthropic API) …")
-    anthropic = _anthropic_client()
-    hyde_res = run_benchmark(cur, bm25_indexes, mode="hyde", anthropic_client=anthropic)
+    all_results: dict[str, Any] = {}
+    for mode in modes_to_run:
+        if mode == "reranked":
+            print("Warming up cross-encoder reranker …")
+        elif mode == "hyde":
+            print("Running HyDE augment benchmark (calls Anthropic API) …")
+        res = run_benchmark(
+            cur,
+            bm25_indexes,
+            mode=mode,
+            anthropic_client=anthropic_client,
+            queries=queries,
+        )
+        all_results[mode] = res
 
     conn.close()
 
     sep = "=" * 60
-    print(sep)
-    print("DENSE BASELINE (Phase 3.2 anchor — D-016)")
-    print(sep)
-    _print_results(dense_res)
+    mode_labels = {
+        "dense": "DENSE BASELINE (Phase 3.2 anchor — D-016)",
+        "hybrid": "HYBRID RRF (Phase 3.3 — D-017)",
+        "reranked": "HYBRID + RERANK (Phase 3.3 — D-018)",
+        "hyde": "HYBRID + HyDE 3-STREAM (Phase 3.3 — D-019)",
+    }
+    for mode in modes_to_run:
+        print(sep)
+        print(mode_labels[mode])
+        print(sep)
+        _print_results(all_results[mode])
 
-    print(sep)
-    print("HYBRID RRF (Phase 3.3 — D-017)")
-    print(sep)
-    _print_results(hybrid_res)
-
-    print(sep)
-    print("HYBRID + RERANK (Phase 3.3 — D-018)")
-    print(sep)
-    _print_results(reranked_res)
-
-    print(sep)
-    print("HYBRID + HyDE 3-STREAM (Phase 3.3 — D-019)")
-    print(sep)
-    _print_results(hyde_res)
-
-    print(sep)
-    print("DELTA vs dense baseline")
-    print(sep)
-    header = f"  {'metric':<14}  {'hybrid':>10}  {'reranked':>10}  {'hyde':>10}"
-    print(header)
-    for metric in ("hit_at_1", "hit_at_5", "mrr_at_10", "recall_at_10"):
-        d_hy = float(hybrid_res[metric]) - float(dense_res[metric])
-        d_re = float(reranked_res[metric]) - float(dense_res[metric])
-        d_hd = float(hyde_res[metric]) - float(dense_res[metric])
-        print(f"  {metric:<14}  {d_hy:>+10.4f}  {d_re:>+10.4f}  {d_hd:>+10.4f}")
+    if len(modes_to_run) > 1:
+        dense_res = all_results["dense"]
+        print(sep)
+        print("DELTA vs dense baseline")
+        print(sep)
+        other_modes = [m for m in modes_to_run if m != "dense"]
+        header = f"  {'metric':<14}" + "".join(f"  {m:>10}" for m in other_modes)
+        print(header)
+        for metric in ("hit_at_1", "hit_at_5", "mrr_at_10", "recall_at_10"):
+            row_str = f"  {metric:<14}"
+            for m in other_modes:
+                delta = float(all_results[m][metric]) - float(dense_res[metric])
+                row_str += f"  {delta:>+10.4f}"
+            print(row_str)
 
     out = Path("benchmark_retrieval_results.json")
     out.write_text(
         json.dumps(
             {
-                "phase": "3.3",
+                "eval_label": eval_label,
                 "corpus_chunks": total_chunks,
-                "dense": dense_res,
-                "hybrid": hybrid_res,
-                "reranked": reranked_res,
-                "hyde": hyde_res,
+                **all_results,
             },
             indent=2,
         )

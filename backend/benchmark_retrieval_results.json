@@ -1,645 +1,23 @@
 {
-  "phase": "3.3",
+  "eval_label": "data/eval/eval_rag.jsonl",
   "corpus_chunks": 9654,
-  "dense": {
-    "mode": "dense",
-    "n_queries": 18,
-    "hit_at_1": 0.8333,
-    "hit_at_5": 0.9444,
-    "mrr_at_10": 0.8889,
-    "recall_at_10": 0.9259,
-    "elapsed_s": 8.8,
-    "per_query": [
-      {
-        "query": "How do I prevent data leakage when applying preprocessing in",
-        "relevant": [
-          "doc:common_pitfalls",
-          "doc:modules__cross_validation",
-          "doc:modules__compose"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 0.6667
-      },
-      {
-        "query": "What are the steps to implement a custom transformer compati",
-        "relevant": [
-          "doc:modules__compose",
-          "doc:developers__develop"
-        ],
-        "hit@1": false,
-        "hit@5": false,
-        "mrr@10": 0.1667,
-        "recall@10": 0.5
-      },
-      {
-        "query": "How does StandardScaler handle features with zero variance?",
-        "relevant": [
-          "doc:modules__preprocessing"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How do I tune hyperparameters with GridSearchCV and cross-va",
-        "relevant": [
-          "doc:modules__grid_search",
-          "doc:modules__cross_validation"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 0.5
-      },
-      {
-        "query": "What metrics are available for evaluating multi-label classi",
-        "relevant": [
-          "doc:modules__model_evaluation"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How does SelectKBest feature selection work and which score ",
-        "relevant": [
-          "doc:modules__feature_selection"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How can I speed up sklearn predictions for large datasets?",
-        "relevant": [
-          "doc:computing__computational_performance"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.3333,
-        "recall@10": 1.0
-      },
-      {
-        "query": "What is the difference between PCA and TruncatedSVD for dime",
-        "relevant": [
-          "doc:modules__decomposition"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How do I contribute a new estimator to scikit-learn?",
-        "relevant": [
-          "doc:developers__contributing",
-          "doc:developers__develop"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "LabelEncoder raises AttributeError about set_output after fi",
-        "relevant": [
-          "issue:26711"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "RandomForest split criterion documentation is confusing or i",
-        "relevant": [
-          "issue:27159"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "LogisticRegression hangs or freezes when input has very larg",
-        "relevant": [
-          "issue:7486"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "VotingClassifier should support prefit estimators without re",
-        "relevant": [
-          "issue:7382"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "OneVsOneClassifier decision_function returns unexpected shap",
-        "relevant": [
-          "issue:8049"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "check_estimator fails after calling set_output on a transfor",
-        "relevant": [
-          "issue:26842"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "Request to add progress bar support to long-running sklearn ",
-        "relevant": [
-          "issue:7574"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How to change which class is treated as positive in binary c",
-        "relevant": [
-          "issue:26758"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "RFC or discussion on freezing fitted estimators to prevent a",
-        "relevant": [
-          "issue:8370"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.5,
-        "recall@10": 1.0
-      }
-    ]
-  },
-  "hybrid": {
-    "mode": "hybrid",
-    "n_queries": 18,
-    "hit_at_1": 0.8333,
-    "hit_at_5": 1.0,
-    "mrr_at_10": 0.9074,
-    "recall_at_10": 1.0,
-    "elapsed_s": 0.3,
-    "per_query": [
-      {
-        "query": "How do I prevent data leakage when applying preprocessing in",
-        "relevant": [
-          "doc:common_pitfalls",
-          "doc:modules__cross_validation",
-          "doc:modules__compose"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "What are the steps to implement a custom transformer compati",
-        "relevant": [
-          "doc:modules__compose",
-          "doc:developers__develop"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How does StandardScaler handle features with zero variance?",
-        "relevant": [
-          "doc:modules__preprocessing"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How do I tune hyperparameters with GridSearchCV and cross-va",
-        "relevant": [
-          "doc:modules__grid_search",
-          "doc:modules__cross_validation"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "What metrics are available for evaluating multi-label classi",
-        "relevant": [
-          "doc:modules__model_evaluation"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How does SelectKBest feature selection work and which score ",
-        "relevant": [
-          "doc:modules__feature_selection"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How can I speed up sklearn predictions for large datasets?",
-        "relevant": [
-          "doc:computing__computational_performance"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.5,
-        "recall@10": 1.0
-      },
-      {
-        "query": "What is the difference between PCA and TruncatedSVD for dime",
-        "relevant": [
-          "doc:modules__decomposition"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How do I contribute a new estimator to scikit-learn?",
-        "relevant": [
-          "doc:developers__contributing",
-          "doc:developers__develop"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "LabelEncoder raises AttributeError about set_output after fi",
-        "relevant": [
-          "issue:26711"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "RandomForest split criterion documentation is confusing or i",
-        "relevant": [
-          "issue:27159"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "LogisticRegression hangs or freezes when input has very larg",
-        "relevant": [
-          "issue:7486"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.3333,
-        "recall@10": 1.0
-      },
-      {
-        "query": "VotingClassifier should support prefit estimators without re",
-        "relevant": [
-          "issue:7382"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "OneVsOneClassifier decision_function returns unexpected shap",
-        "relevant": [
-          "issue:8049"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "check_estimator fails after calling set_output on a transfor",
-        "relevant": [
-          "issue:26842"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "Request to add progress bar support to long-running sklearn ",
-        "relevant": [
-          "issue:7574"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How to change which class is treated as positive in binary c",
-        "relevant": [
-          "issue:26758"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.5,
-        "recall@10": 1.0
-      },
-      {
-        "query": "RFC or discussion on freezing fitted estimators to prevent a",
-        "relevant": [
-          "issue:8370"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      }
-    ]
-  },
-  "reranked": {
-    "mode": "reranked",
-    "n_queries": 18,
-    "hit_at_1": 0.4444,
-    "hit_at_5": 0.8333,
-    "mrr_at_10": 0.5847,
-    "recall_at_10": 0.8704,
-    "elapsed_s": 9.2,
-    "per_query": [
-      {
-        "query": "How do I prevent data leakage when applying preprocessing in",
-        "relevant": [
-          "doc:common_pitfalls",
-          "doc:modules__cross_validation",
-          "doc:modules__compose"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 0.6667
-      },
-      {
-        "query": "What are the steps to implement a custom transformer compati",
-        "relevant": [
-          "doc:modules__compose",
-          "doc:developers__develop"
-        ],
-        "hit@1": false,
-        "hit@5": false,
-        "mrr@10": 0.125,
-        "recall@10": 0.5
-      },
-      {
-        "query": "How does StandardScaler handle features with zero variance?",
-        "relevant": [
-          "doc:modules__preprocessing"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.25,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How do I tune hyperparameters with GridSearchCV and cross-va",
-        "relevant": [
-          "doc:modules__grid_search",
-          "doc:modules__cross_validation"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 0.5
-      },
-      {
-        "query": "What metrics are available for evaluating multi-label classi",
-        "relevant": [
-          "doc:modules__model_evaluation"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.3333,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How does SelectKBest feature selection work and which score ",
-        "relevant": [
-          "doc:modules__feature_selection"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How can I speed up sklearn predictions for large datasets?",
-        "relevant": [
-          "doc:computing__computational_performance"
-        ],
-        "hit@1": false,
-        "hit@5": false,
-        "mrr@10": 0.0,
-        "recall@10": 0.0
-      },
-      {
-        "query": "What is the difference between PCA and TruncatedSVD for dime",
-        "relevant": [
-          "doc:modules__decomposition"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.5,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How do I contribute a new estimator to scikit-learn?",
-        "relevant": [
-          "doc:developers__contributing",
-          "doc:developers__develop"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "LabelEncoder raises AttributeError about set_output after fi",
-        "relevant": [
-          "issue:26711"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.25,
-        "recall@10": 1.0
-      },
-      {
-        "query": "RandomForest split criterion documentation is confusing or i",
-        "relevant": [
-          "issue:27159"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.5,
-        "recall@10": 1.0
-      },
-      {
-        "query": "LogisticRegression hangs or freezes when input has very larg",
-        "relevant": [
-          "issue:7486"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "VotingClassifier should support prefit estimators without re",
-        "relevant": [
-          "issue:7382"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.2,
-        "recall@10": 1.0
-      },
-      {
-        "query": "OneVsOneClassifier decision_function returns unexpected shap",
-        "relevant": [
-          "issue:8049"
-        ],
-        "hit@1": false,
-        "hit@5": true,
-        "mrr@10": 0.2,
-        "recall@10": 1.0
-      },
-      {
-        "query": "check_estimator fails after calling set_output on a transfor",
-        "relevant": [
-          "issue:26842"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "Request to add progress bar support to long-running sklearn ",
-        "relevant": [
-          "issue:7574"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How to change which class is treated as positive in binary c",
-        "relevant": [
-          "issue:26758"
-        ],
-        "hit@1": false,
-        "hit@5": false,
-        "mrr@10": 0.1667,
-        "recall@10": 1.0
-      },
-      {
-        "query": "RFC or discussion on freezing fitted estimators to prevent a",
-        "relevant": [
-          "issue:8370"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      }
-    ]
-  },
   "hyde": {
     "mode": "hyde",
-    "n_queries": 18,
-    "hit_at_1": 0.8889,
-    "hit_at_5": 1.0,
-    "mrr_at_10": 0.9444,
+    "n_queries": 24,
+    "hit_at_1": 0.75,
+    "hit_at_5": 0.9583,
+    "mrr_at_10": 0.8532,
     "recall_at_10": 1.0,
-    "elapsed_s": 54.9,
+    "elapsed_s": 71.0,
     "per_query": [
       {
         "query": "How do I prevent data leakage when applying preprocessing in",
         "relevant": [
-          "doc:common_pitfalls",
-          "doc:modules__cross_validation",
-          "doc:modules__compose"
+          "doc:common_pitfalls"
         ],
-        "hit@1": true,
+        "hit@1": false,
         "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "What are the steps to implement a custom transformer compati",
-        "relevant": [
-          "doc:modules__compose",
-          "doc:developers__develop"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How does StandardScaler handle features with zero variance?",
-        "relevant": [
-          "doc:modules__preprocessing"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How do I tune hyperparameters with GridSearchCV and cross-va",
-        "relevant": [
-          "doc:modules__grid_search",
-          "doc:modules__cross_validation"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
+        "mrr@10": 0.5,
         "recall@10": 1.0
       },
       {
@@ -653,40 +31,9 @@
         "recall@10": 1.0
       },
       {
-        "query": "How does SelectKBest feature selection work and which score ",
-        "relevant": [
-          "doc:modules__feature_selection"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "How can I speed up sklearn predictions for large datasets?",
-        "relevant": [
-          "doc:computing__computational_performance"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
-        "query": "What is the difference between PCA and TruncatedSVD for dime",
-        "relevant": [
-          "doc:modules__decomposition"
-        ],
-        "hit@1": true,
-        "hit@5": true,
-        "mrr@10": 1.0,
-        "recall@10": 1.0
-      },
-      {
         "query": "How do I contribute a new estimator to scikit-learn?",
         "relevant": [
-          "doc:developers__contributing",
-          "doc:developers__develop"
+          "doc:developers__contributing"
         ],
         "hit@1": true,
         "hit@5": true,
@@ -764,9 +111,19 @@
         "recall@10": 1.0
       },
       {
-        "query": "How to change which class is treated as positive in binary c",
+        "query": "RFC or discussion on freezing fitted estimators to prevent a",
         "relevant": [
-          "issue:26758"
+          "issue:8370"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "What is the difference between fit_transform and calling fit",
+        "relevant": [
+          "doc:glossary"
         ],
         "hit@1": false,
         "hit@5": true,
@@ -774,9 +131,119 @@
         "recall@10": 1.0
       },
       {
-        "query": "RFC or discussion on freezing fitted estimators to prevent a",
+        "query": "How does cross_val_score differ from cross_validate?",
         "relevant": [
-          "issue:8370"
+          "doc:modules__cross_validation"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "What is the set_output API and how do I make my transformer ",
+        "relevant": [
+          "doc:developers__develop"
+        ],
+        "hit@1": false,
+        "hit@5": false,
+        "mrr@10": 0.1429,
+        "recall@10": 1.0
+      },
+      {
+        "query": "How does StratifiedKFold handle imbalanced class distributio",
+        "relevant": [
+          "doc:modules__cross_validation"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "What is the process for deprecating a parameter in scikit-le",
+        "relevant": [
+          "doc:developers__contributing"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "What is the purpose of the BaseEstimator and ClassifierMixin",
+        "relevant": [
+          "doc:developers__develop"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "HistGradientBoostingClassifier categorical_features paramete",
+        "relevant": [
+          "doc:modules__ensemble"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "How do I interpret the feature_importances_ attribute in tre",
+        "relevant": [
+          "doc:modules__permutation_importance"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "Pipeline predict raises ValueError about input shape after a",
+        "relevant": [
+          "doc:modules__compose"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "How does the n_jobs parameter affect parallel execution in s",
+        "relevant": [
+          "doc:faq"
+        ],
+        "hit@1": false,
+        "hit@5": true,
+        "mrr@10": 0.3333,
+        "recall@10": 1.0
+      },
+      {
+        "query": "What does the verbose parameter control in fitting methods?",
+        "relevant": [
+          "doc:glossary"
+        ],
+        "hit@1": true,
+        "hit@5": true,
+        "mrr@10": 1.0,
+        "recall@10": 1.0
+      },
+      {
+        "query": "What is the clone function in sklearn.base and when should I",
+        "relevant": [
+          "doc:common_pitfalls"
+        ],
+        "hit@1": false,
+        "hit@5": true,
+        "mrr@10": 0.5,
+        "recall@10": 1.0
+      },
+      {
+        "query": "What base classes does a custom sklearn transformer need to ",
+        "relevant": [
+          "doc:developers__develop"
         ],
         "hit@1": true,
         "hit@5": true,

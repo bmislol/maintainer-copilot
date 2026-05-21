@@ -1024,6 +1024,88 @@ A `Literal` type is simpler, maps directly to JSON request params, and avoids an
 
 ---
 
+## D-021: RAG Eval Thresholds, Golden Set, and Judge Agreement
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+Phase 3.4 requires a golden set, a CI eval gate, and a human↔judge agreement measurement. All three must produce real numbers — no placeholders.
+
+### Golden Set Methodology
+
+**Curation process:** 56 candidate questions (c001–c056) generated covering documentation topics and GitHub issue scenarios. Each candidate was retrieved against the live corpus using `RAGPipeline(use_hyde=False, top_k=5)` and results cached to `data/eval/.curation_cache.json`. Interactive curation loop reviewed each question's top-5 results and accepted the best-matching chunk as ground truth.
+
+**Acceptance criteria:** A chunk was accepted if it was a substantive answer to the question — not a section header, not a redirect, not an issue opener asking the question rather than answering it. Re-curation was performed on 4 entries after initial pass:
+- Replaced section-header chunk with metrics explanation chunk (q002)
+- Replaced FAQ redirect with actual contribution steps (q003)
+- Replaced issue opener with technical explanation comment (q005)
+- Dropped one question where no top-5 chunk was adequate; added replacement question (q024)
+
+**Final set:** 24 triples (originally targeted 25; one post-curation de-duplication removed `doc:common_pitfalls:8` which appeared in both q001 and a later entry).
+
+**Source split:** 16 doc / 8 issue.
+
+**File:** `backend/data/eval/eval_rag.jsonl`. Schema per row: `{question_id, question, ground_truth_chunk_id, ground_truth_text, source_type, notes}`.
+
+### Benchmark Results on Golden Set
+
+Note: hit@5 is computed using a source_type:source_id prefix match (stripping the chunk index suffix) to allow for window-chunk variation, meaning a retrieval is considered successful if the right document section is retrieved, even if a different window chunk from that section appeared.
+
+Measured on 2026-05-21 using `RAGPipeline(use_hyde=True, top_k=10)` against all 24 triples:
+
+| metric    | value  |
+|-----------|--------|
+| hit@5     | 95.83% (23/24) |
+| MRR@10    | 0.8532 |
+| recall@10 | 100.00% |
+
+Single miss: q014 ("What is the set_output API…") — the ground-truth chunk `doc:developers__develop:43` did not appear in the top-5. This question has broad keyword overlap with unrelated chunks; noted for Phase 4 query-routing improvement.
+
+### Threshold Methodology
+
+Thresholds set at measured value minus 10 percentage points — identical methodology to D-013 (classification thresholds). This gives a regression budget: a change must degrade retrieval by more than 10 pp to trigger a CI failure, which rules out noise while catching real regressions.
+
+| metric | measured | threshold |
+|--------|----------|-----------|
+| hit@5  | 0.9583   | 0.8583    |
+| MRR@10 | 0.8532   | 0.7532    |
+
+Committed in `backend/eval_thresholds.yaml` under `rag:`.
+
+### Judge Agreement
+
+5 triples (q001–q005) were hand-labeled "yes" (passage correctly answers question) at curation time. Claude Haiku 4.5 was asked the same judgment for each using the prompt in `scripts/judge_agreement.py`. Results saved to `data/eval/judge_agreement.json`.
+
+| question_id | Human | Claude | Agree |
+|-------------|-------|--------|-------|
+| q001        | yes   | yes    | ✓     |
+| q002        | yes   | no     | ✗     |
+| q003        | yes   | no     | ✗     |
+| q004        | yes   | no     | ✗     |
+| q005        | yes   | no     | ✗     |
+
+**Agreement: 1/5 (20%)**
+
+**Interpretation — calibration gap, not curation failure.** The 4 disagreements share a consistent pattern: the human curator accepted a chunk that is *relevant and correct* for retrieval purposes, while Haiku applied a stricter *completely and specifically answers* standard. Specifically:
+- q002: chunk explains binary→multilabel metric extension (correct but incomplete list)
+- q003: chunk gives actual contribution steps (correct but not estimator-specific)
+- q004: 2-sentence root-cause comment — Haiku wanted a full explanation and resolution
+- q005: chunk explains the split criterion method — Haiku noted it answers the technical question but not the meta-question about documentation quality
+
+The q001 agreement (Haiku: "yes") occurred on a chunk that is a standalone, self-contained answer. The curation standard was "best available chunk for retrieval recall"; the judge standard was "passage fully answers the question." These are different bars.
+
+**Decision:** Document the 20% as the measured calibration gap. Adjusting the judge prompt to inflate agreement would be p-hacking the eval. The finding is that single-chunk ground truth + strict LLM judge produces low agreement by design, and this is expected behaviour for any RAG corpus where answers span multiple chunks.
+
+### CI Design
+
+`eval-classification.yml` runs on every PR because it has no DB dependency (Haiku API only).
+
+`eval-rag.yml` is `workflow_dispatch` only because the RAG gate requires a live pgvector DB with ~9700 indexed chunks. Spinning it up in CI would add 5–10 minutes of fragile build time per PR. The gate is run manually before merging any change that touches `app/rag/`, `data/eval/eval_rag.jsonl`, or `eval_thresholds.yaml`.
+
+---
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted

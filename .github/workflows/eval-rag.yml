@@ -1,0 +1,49 @@
+name: eval-rag
+
+# Manual-dispatch only — see D-021 for rationale.
+#
+# The RAG eval gate requires a live pgvector DB with ~9700 indexed chunks.
+# Spinning up postgres + running Alembic migrations + indexing that data in CI
+# would add 5–10 minutes of fragile build time per run.
+#
+# Design decision (D-021):
+#   - This workflow runs on workflow_dispatch only (manual trigger from
+#     the Actions tab or gh CLI).
+#   - PR-time CI (lint, type-check, unit tests) runs without -m eval, so
+#     eval tests are skipped automatically.
+#   - Maintainer runs this manually before merging any PR that touches
+#     app/rag/, data/eval/eval_rag.jsonl, or eval_thresholds.yaml.
+#
+# Compare: eval-classification.yml runs on PRs because it has no DB dependency.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eval-rag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: run RAG eval gate
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          uv run pytest tests/test_eval_rag.py -m eval -v -s --tb=short
