@@ -25,7 +25,7 @@ It runs in two places that share one FastAPI backend:
 
 **Execution Rule**: Always act as a technical planner first. For complex tasks, propose a step-by-step implementation plan and wait for my approval before executing code changes. Once approved, write the code.
 
-**Status**: Section 1 (foundations) and Section 2 (DL track) are complete and merged. We're now on Section 3 (advanced RAG). Branch is `feat/12-rag-corpus`, on Phase 3.1.
+**Status**: Section 1 (foundations), Section 2 (DL track), and Section 3 (advanced RAG) are complete and merged to main. We're now on Section 4 (Chatbot + Memory + Embed). Branch: create feat/17-auth.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — Read this to understand the granular step-by-step progress and exactly which checklist items have been completed so far. **You are responsible for maintaining this file. Update it whenever we start or finish a new phase.**
@@ -52,6 +52,10 @@ Before suggesting any work, read these files in order:
 | NER model | `dslim/bert-base-NER` from HF Hub | `deliverables/DECISIONS.md` D-014 |
 | Summarizer | Claude Haiku 4.5 via Anthropic SDK | `deliverables/DECISIONS.md` D-014 |
 | Eval threshold floor | classification.macro_f1 ≥ 0.90, per-class ≥ 0.50 | `deliverables/DECISIONS.md` D-013 |
+| Embedding model | all-MiniLM-L6-v2 (384-dim), local | deliverables/DECISIONS.md D-015 |
+| Chunking strategy | Structural (RST headings + issue turns) with sliding-window fallback | deliverables/DECISIONS.md D-016 |
+| Hybrid retrieval | BM25 + dense + RRF (k=60), HyDE augment, source_type filter | deliverables/DECISIONS.md D-017–D-020 |
+| RAG eval threshold | hit_at_5 ≥ 0.8583, MRR@10 ≥ 0.7532 | deliverables/DECISIONS.md D-021 |
 
 ---
 
@@ -139,57 +143,85 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 ---
 
-### Section 3 — Advanced RAG (Wednesday) · 5 phases (CURRENT)
-
-#### Phase 3.1 · Corpus + embedding choice
-
-- Build the RAG corpus: FastAPI docs (cloned) + held-out resolved-issues slice. Strict: held-out issues are not in classifier training.
-- Preprocessing pipeline defended in DECISIONS D-016 prep (Markdown handling, code-block strategy, frontmatter strip).
-- Pick an embedding model; compare against at least one alternative on the eventual golden set (or a quick proxy set if 3.4 is not landed yet). Record the retrieval-quality number.
-
-**Deliverables updated:** `deliverables/DECISIONS.md` D-015.
-
-#### Phase 3.2 · Smart chunking + pgvector
-
-- Chunking strategy that is **not** naive fixed-size: pick semantic / structural / late-chunking and defend.
-- pgvector tables and indexes live in Alembic.
-- Naive dense baseline retrieval working — this is the number every subsequent phase has to beat.
-
-**Deliverables updated:** `deliverables/DECISIONS.md` D-016, `deliverables/ARCH.md` §11.
-
-#### Phase 3.3 · Hybrid + rerank + query transform + metadata filter
-
-- BM25 sparse retrieval + dense retrieval, weighted (tuned on the golden set or proxy).
-- Cross-encoder reranker over the top-k.
-- Query transformation: HyDE or multi-query — pick one.
-- Metadata filtering: at least one filter (e.g. `is_resolved`, `version`).
-
-**Deliverables updated:** `deliverables/DECISIONS.md` D-017, D-018, D-019, D-020, `deliverables/ARCH.md` §11.
-
-#### Phase 3.4 · RAG golden set + CI gate + judge agreement
-
-- 25 triples (question / ideal answer / ground-truth chunks).
-- Eval harness measures hit@5, MRR@10, faithfulness, answer relevancy.
-- Hand-label 5 of 25; report human↔judge agreement in DECISIONS D-021.
-- `eval_thresholds.yaml` updated with real RAG numbers.
-- `.github/workflows/eval-rag.yml` runs on every push and PR.
-
-**Deliverables updated:** `deliverables/DECISIONS.md` D-021, `deliverables/EVALS.md` §2.
-
-#### Phase 3.5 · Redaction + exception handling
-
-- `app/infra/redaction.py` with the defended pattern list.
-- Called by the logger, the Langfuse adapter, the memory writer, before any string crosses the service boundary.
-- Redaction test asserts that `sk-test-FAKE-not-real` never appears unredacted in logs, traces, short-term memory, or long-term memory.
-- Domain exception hierarchy (`NotFoundError`, `PermissionDenied`, `ToolFailure`, etc.) distinct from infra exceptions.
-- Single exception handler at the API boundary maps domain exceptions to structured HTTP errors with a `code` and `request_id`. Users never see a stack trace.
-
-**Deliverables updated:** `deliverables/DECISIONS.md` D-022, `deliverables/SECURITY.md` §7.
+### Section 3 — Advanced RAG (Wednesday) · 5 phases (COMPLETED)
+(Phases 3.1 through 3.5 are complete. See Checklist.md for granular details).
 
 ---
 
-### Section 4 — Chatbot + Memory + Embed (Thursday — heaviest day) · 7 phases
-(Details omitted for brevity until Section 3 is complete).
+### Section 4 — Chatbot + Memory + Embed (Thursday — heaviest day) · 7 phases (CURRENT)
+#### Phase 4.1 · Auth
+
+- fastapi-users + JWT, signing key from Vault.
+- Two roles: user, admin.
+- Admin-invite-only registration (no public /register).
+- Bootstrap scripts: app.entrypoints.bootstrap_admin and bootstrap_admin_role.
+- End-to-end login test passing.
+
+*Deliverables updated:* deliverables/ARCH.md §6, §7, deliverables/SECURITY.md §4, §5, deliverables/RUNBOOK.md §3.
+
+#### Phase 4.2 · Chatbot core (single tool-calling LLM)
+
+- One Claude tool-calling loop. Not a workflow. Not multi-agent.
+- Tools registered: classify_issue, extract_entities, summarize_thread, retrieve_docs, write_memory.
+- Prompts as versioned files in app/prompts/.
+- Tool failures caught in services and recovered (return a user-visible "tool X is unavailable" assistant message; no 500).
+- `/chat/send` endpoint streams the assistant reply via Server-Sent Events (SSE).
+- Streamlit uses the SSE stream directly. React widget uses EventSource.
+
+*Deliverables updated:* deliverables/ARCH.md §5, §7.
+
+#### Phase 4.3 · Memory (short + long)
+
+- Short-term: Redis. TTL chosen and defended.
+- Long-term: pgvector. Memory type (episodic / semantic / procedural) chosen and defended.
+- write_memory is explicit only — never auto-write.
+- Every long-term write produces an audit_log row with actor, action, target, timestamp, request_id, trace_id.
+- Cross-conversation recall test: write a fact in conversation A, retrieve it in conversation B.
+
+*Deliverables updated:* deliverables/DECISIONS.md D-023, D-024, deliverables/ARCH.md §8, deliverables/SECURITY.md §6.
+
+#### Phase 4.4 · Streamlit admin app
+
+- Login page (JWT).
+- Full chat with streamed responses.
+- Memory inspector (read-only list of own long-term entries).
+- Admin-only widget configuration page that generates embed snippets.
+- Fully demoable here before touching React.
+- Connects to the api container at localhost:8000 (not inside docker network)
+
+*Deliverables updated:* deliverables/ARCH.md §13.1.
+
+#### Phase 4.5 · React widget
+
+- Vite build → single bundled JS file.
+- Chat panel, input box, streamed messages, collapsible bubble.
+- Theme + greeting + enabled-tools list pulled from /widgets/{wid}/config at runtime.
+- One postMessage channel (at minimum for iframe resize).
+- Bundle size measured (gzipped) and recorded for the submission block + DECISIONS D-025.
+
+*Deliverables updated:* deliverables/DECISIONS.md D-025, deliverables/ARCH.md §13.2.
+
+#### Phase 4.6 · Widget config + loader + demo host
+
+- widgets table fields: id, theme, greeting, enabled_tools, allowed_origins (list).
+- Admin Streamlit page creates/edits widget configs and shows the embed snippet.
+- Loader at /widget.js reads data-widget-id and injects the iframe.
+- CORS allowlist enforced from allowed_origins, not from env.
+- Content-Security-Policy: frame-ancestors header set from allowed_origins on widget-bundle route.
+- demo/host/ is one HTML file plus nginx config; loads the widget.
+
+*Deliverables updated:* deliverables/ARCH.md §13.3, deliverables/SECURITY.md §8.
+
+#### Phase 4.7 · Block/allow demo + both eval suites green in CI
+
+- Run the widget in demo/host/ on the allowed origin → bubble appears, chat works.
+- Run a second host page on a disallowed origin → browser blocks the embed; console shows frame-ancestors violation.
+- Cross-conversation memory recall demo end-to-end.
+- Both eval gates green on main.
+- Demo script written as a numbered checklist in RUNBOOK.md §6 (what to click, in order, for Friday presentation)
+
+*Deliverables updated:* deliverables/RUNBOOK.md §6 (demo flow).
+
 ---
 
 ### Section 5 — Polish + Present (Friday) · 3 phases
@@ -207,7 +239,7 @@ PR template: lives at `.github/pull_request_template.md` (added in Phase 1.1).
 
 ---
 
-## 8. Daily Quickstart
+## 9. Daily Quickstart
 
 Each morning:
 

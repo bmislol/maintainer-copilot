@@ -58,23 +58,29 @@ Seeded by `vault-init` at compose startup from docker-compose environment variab
 
 ## 4. Authentication
 
-`fastapi-users` with JWT (Bearer transport).
+Last updated: 2026-05-21 (Phase 4.1)
 
-Rules:
+`fastapi-users 13.x` with `BearerTransport` + `JWTStrategy`.
 
-- JWT signing key resolves from Vault at startup.
-- JWT payload contains user ID and role(s) only — no sensitive information.
-- Every protected route requires a valid Bearer token.
-- Registration is admin-invite-only. No public `/register` endpoint exists in the final flow.
+- **JWT signing key** — resolved from Vault at lifespan startup; stored in `app.state.secrets.jwt`. The `get_jwt_strategy` FastAPI dependency reads it from `request.app.state` at request time. It is never present in environment variables, never logged, and never committed to Git.
+- **Algorithm** — `HS256` (seeded by `vault-init.sh`; production deployments should replace with a 256-bit random key).
+- **Token lifetime** — configurable via Vault (`access_token_lifetime_seconds`); dev default is 3600 s.
+- **Token payload** — contains user `id` (UUID) only. No role, no email, no PII in the JWT body.
+- **Every protected route** requires a valid `Authorization: Bearer <token>` header. Missing or expired tokens return 401.
+- **No public `/register` endpoint** — `fastapi_users.get_register_router()` is not mounted. New users can only be created via `bootstrap_admin.py` (first admin) or a future admin-invite endpoint (Phase 4.4).
 
 ## 5. Authorization
 
-Two roles:
+Last updated: 2026-05-21 (Phase 4.1)
 
-- `user` — log in, chat, view own memory, delete own conversations.
-- `admin` — all user permissions, plus invite users, create/edit widget configurations, view audit log.
+Two roles stored as `is_superuser: bool` on the `users` table (D-033):
 
-Role-enforcement mechanism: TBD (Phase 4.1). Permission checks happen in `app/services/`, never in routers.
+| Role | `is_superuser` | Permissions |
+|---|---|---|
+| `user` | `False` | Log in, chat, view own memory, delete own conversations. |
+| `admin` | `True` | All user permissions + invite users, create/edit widget configs, view audit log. |
+
+**Enforcement:** `current_active_superuser` dependency from `app/infra/auth.py` is applied at the route level for admin-only endpoints. A non-superuser token reaching such a route receives a 403 before the handler function executes. Permission checks are in route dependencies, not in service logic — the service layer trusts that callers are already authorized.
 
 ## 6. Audit Log
 

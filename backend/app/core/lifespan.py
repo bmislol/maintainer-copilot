@@ -14,6 +14,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.logging import configure_logging
 from app.infra.tracing import (
@@ -92,9 +93,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise
 
     app.state.secrets = secrets
+
+    # Async SQLAlchemy engine and session factory — created here so the DB URL
+    # is read from Vault-resolved secrets, not from an env var.
+    engine = create_async_engine(secrets.database.url, pool_pre_ping=True)
+    app.state.db_engine = engine
+    app.state.db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
     logger.info("api startup complete")
 
     yield
 
-    logger.info("api shutdown — flushing langfuse")
+    logger.info("api shutdown — flushing langfuse and disposing db engine")
+    await app.state.db_engine.dispose()
     shutdown_langfuse()

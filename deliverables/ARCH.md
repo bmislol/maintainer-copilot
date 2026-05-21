@@ -117,41 +117,48 @@ This boundary is graded. It will be checked on Friday by being asked to add a ne
 
 ## 6. Authentication and Authorization
 
-Authentication is `fastapi-users` with JWT (Bearer transport). JWT signing key resolves from Vault at startup.
+Last updated: 2026-05-21 (Phase 4.1)
 
-Registration is admin-invite-only. Public registration is not exposed.
+**Library:** `fastapi-users[sqlalchemy] 13.x` with `BearerTransport` + `JWTStrategy`.
 
-Two roles: `user` and `admin`.
+**JWT signing key:** resolved from Vault at lifespan startup (`secrets.jwt.signing_key`, algorithm `HS256`, lifetime from `secrets.jwt.access_token_lifetime_seconds`). The `get_jwt_strategy` dependency reads from `request.app.state.secrets.jwt` at request time — never at module import time and never from an environment variable.
 
-| Role | Permissions |
-|---|---|
-| `user` | Log in, chat with the bot, view their own memory, delete their own conversations. |
-| `admin` | All `user` permissions, plus invite users, create/edit widget configurations, view audit log. |
+**Registration:** admin-invite-only. There is no public `/auth/register` endpoint; the `get_register_router()` router from fastapi-users is intentionally not mounted. First admin is created via `app/entrypoints/bootstrap_admin.py` (see RUNBOOK §3).
 
-Role storage and exact enforcement mechanism: TBD (to be filled in by Phase 4.1).
+**Role model:** `is_superuser: bool` on the `users` table (D-033). Two roles map to a single boolean:
+
+| Role | `is_superuser` | Permissions |
+|---|---|---|
+| `user` | `False` | Log in, chat, view own memory, delete own conversations. |
+| `admin` | `True` | All user permissions + invite users, create/edit widget configs, view audit log. |
+
+**Enforcement:** routes requiring admin use the `current_active_superuser` dependency exported from `app/infra/auth.py`. Non-superusers receive a 403 response from fastapi-users before the handler runs.
+
+**DB engine:** the async SQLAlchemy engine and `async_sessionmaker` are created during lifespan startup from `secrets.database.url` (Vault-resolved) and stored in `app.state.db_engine` / `app.state.db_session_factory`. The `get_async_session` dependency in `app/db/session.py` reads from `request.app.state.db_session_factory` per request.
 
 ## 7. Endpoint Inventory
 
-Placeholder. Filled in by Phase 4.1 (auth) and Phase 4.2 (chatbot core).
+Last updated: 2026-05-21 (Phase 4.1 — auth routes live; chatbot routes added by Phase 4.2)
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
-| `POST` | `/auth/login` | Public | JWT login. |
-| `POST` | `/auth/logout` | Authenticated | Stateless. |
-| `GET` | `/me` | Authenticated | Current user. |
-| `GET` | `/healthz` | Public | Liveness. |
-| `POST` | `/chat/send` | Authenticated | Send a message; streams assistant reply. |
-| `GET` | `/conversations` | Authenticated | List own conversations. |
-| `GET` | `/conversations/{cid}` | Authenticated | Get conversation history. |
-| `DELETE` | `/conversations/{cid}` | Authenticated | Delete conversation (audit-logged). |
-| `GET` | `/memory/long` | Authenticated | List own long-term memory entries. |
-| `POST` | `/admin/users/invite` | admin | Invite a user. |
-| `GET` | `/admin/widgets` | admin | List widget configurations. |
-| `POST` | `/admin/widgets` | admin | Create a widget configuration. |
-| `PUT` | `/admin/widgets/{wid}` | admin | Update a widget configuration. |
-| `GET` | `/admin/audit-log` | admin | Audit log. |
-| `GET` | `/widgets/{wid}/config` | Public (origin-gated) | Widget config read by the loader. |
-| `GET` | `/widget.js` | Public | Loader script. |
+| `POST` | `/auth/jwt/login` | Public | fastapi-users form-encoded login; returns `access_token`. |
+| `POST` | `/auth/jwt/logout` | Authenticated | Invalidates the bearer token (stateless — token just expires). |
+| `GET` | `/users/me` | Authenticated | Current user profile. |
+| `PATCH` | `/users/me` | Authenticated | Update email / password. |
+| `GET` | `/healthz` | Public | Liveness probe. |
+| `POST` | `/chat/send` | Authenticated | Send a message; streams assistant reply via SSE. (Phase 4.2) |
+| `GET` | `/conversations` | Authenticated | List own conversations. (Phase 4.2) |
+| `GET` | `/conversations/{cid}` | Authenticated | Get conversation history. (Phase 4.2) |
+| `DELETE` | `/conversations/{cid}` | Authenticated | Delete conversation (audit-logged). (Phase 4.2) |
+| `GET` | `/memory/long` | Authenticated | List own long-term memory entries. (Phase 4.3) |
+| `POST` | `/admin/users/invite` | admin | Invite a user. (Phase 4.4) |
+| `GET` | `/admin/widgets` | admin | List widget configurations. (Phase 4.6) |
+| `POST` | `/admin/widgets` | admin | Create a widget configuration. (Phase 4.6) |
+| `PUT` | `/admin/widgets/{wid}` | admin | Update a widget configuration. (Phase 4.6) |
+| `GET` | `/admin/audit-log` | admin | Audit log. (Phase 4.3) |
+| `GET` | `/widgets/{wid}/config` | Public (origin-gated) | Widget config read by the loader. (Phase 4.6) |
+| `GET` | `/widget.js` | Public | Loader script. (Phase 4.6) |
 
 ## 8. Memory Plan
 

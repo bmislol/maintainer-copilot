@@ -118,24 +118,52 @@ modelserver downloads `classifier.pt`, `tokenizer/`, and `model_card.json` from 
 
 ## 3. Bootstrap the First Admin User
 
-Filled by Phase 4.1.
+Last updated: 2026-05-21 (Phase 4.1)
+
+`bootstrap_admin.py` runs host-side and connects directly via `DATABASE_URL`. It does not go through Vault or the API. Run it once after `docker compose up` has the DB migrated.
+
+**Prerequisites:** compose stack is up; `migrate` service has exited 0 (`docker compose ps migrate`).
 
 ```bash
-# Step 1 — create the user
-docker compose exec api uv run python -m app.entrypoints.bootstrap_admin \
-  --email admin@example.com --password <password>
+# Obtain the DB URL (same credentials used in .env.example dev defaults)
+export DATABASE_URL="postgresql+asyncpg://copilot:copilot-dev-password@localhost:5432/copilot"
+export BOOTSTRAP_EMAIL="admin@maintainer-copilot.dev"
+export BOOTSTRAP_PASSWORD="change-me-before-demo"
 
-# Step 2 — promote to admin role
-docker compose exec api uv run python -m app.entrypoints.bootstrap_admin_role \
-  --email admin@example.com
+cd backend
+uv run python -m app.entrypoints.bootstrap_admin
 ```
 
-Verify login:
+Expected output:
+```
+Admin user created: admin@maintainer-copilot.dev
+```
+
+The script exits non-zero if `DATABASE_URL`, `BOOTSTRAP_EMAIL`, or `BOOTSTRAP_PASSWORD` are missing, or if a user with that email already exists.
+
+**Verify login:**
 
 ```bash
-curl -s -X POST http://localhost:8000/auth/login \
-  -d "username=admin@example.com&password=<password>"
+curl -s -X POST http://localhost:8000/auth/jwt/login \
+  -d "username=admin@maintainer-copilot.dev&password=change-me-before-demo" \
+  | python3 -m json.tool
 ```
+
+Expected: JSON with `access_token` and `token_type: bearer`.
+
+**Verify /users/me:**
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/jwt/login \
+  -d "username=admin@maintainer-copilot.dev&password=change-me-before-demo" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl -s http://localhost:8000/users/me \
+  -H "Authorization: Bearer $TOKEN" \
+  | python3 -m json.tool
+```
+
+Expected: user JSON with `"is_superuser": true`.
 
 ## 4. Running the Eval Suites
 

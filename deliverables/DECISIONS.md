@@ -1391,6 +1391,35 @@ The brief requires a redaction layer that runs before any string crosses a servi
 
 Full pattern defense cross-references `deliverables/SECURITY.md` §7.
 
+## D-033: `is_superuser` Boolean vs. `role` Column for User Roles
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+The project requires two roles: `user` and `admin`. fastapi-users ships a built-in `is_superuser: bool` field on `SQLAlchemyBaseUserTable` and a `current_active_superuser` dependency that enforces it. The alternative is adding a `role: str` column and writing custom role-resolution logic.
+
+### Decision
+
+Use `is_superuser: bool` (fastapi-users built-in). `admin = True`, `user = False`.
+
+### Why
+
+- **Two roles = one bit.** A boolean is the correct type for a binary choice. A `role: str` column would be correct if there were three or more roles; there are not.
+- **Zero custom code.** `current_active_superuser` dependency is already implemented, tested, and documented by fastapi-users. Using it means no custom enforcement code to write, test, or maintain.
+- **No migration complexity.** `is_superuser` is added in the Phase 4.1 migration alongside the other fastapi-users columns (`hashed_password`, `is_active`, `is_verified`). A `role` column would require an additional migration and a DB-level enum or check constraint.
+- **Defensible at review.** The question "why a boolean and not a role column?" has a one-sentence answer: two roles map exactly to one boolean.
+
+### Alternatives Considered
+
+- **`role: Enum('user', 'admin')`** — Correct for three-or-more roles; overkill here. Adds a Postgres enum type and an additional migration.
+- **`role: str` with a check constraint** — Same downside as enum; adds custom validation in `UserManager.on_after_register()` to default the field.
+
+### Trade-offs
+
+If a third role is needed in the future (e.g. `moderator`), the boolean model requires a migration to add a role column. Acceptable for a 5-day project scoped to two roles.
+
 ## Pending Decisions
 
 Filled in as phases land. Reserved slots:
@@ -1403,6 +1432,7 @@ Filled in as phases land. Reserved slots:
 - **D-020 — Metadata filter design.** ✅ Filled by Phase 3.3.
 - **D-021 — RAG eval thresholds and judge model.** Filled by Phase 3.4.
 - **D-022 — Redaction pattern list.** ✅ Filled by Phase 3.5.
+- **D-033 — `is_superuser` vs. role column.** ✅ Filled by Phase 4.1.
 - **D-023 — Short-term memory TTL and justification.** Filled by Phase 4.3.
 - **D-024 — Long-term memory type (episodic / semantic / procedural) and defense.** Filled by Phase 4.3.
 - **D-025 — Widget bundle target size and any trade-offs accepted to hit it.** Filled by Phase 4.5.
