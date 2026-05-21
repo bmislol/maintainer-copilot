@@ -70,3 +70,15 @@ def shutdown_langfuse() -> None:
     """Flush pending events at shutdown."""
     if _client is not None:
         _client.flush()
+
+
+def redact_metadata(meta: dict[str, object]) -> dict[str, object]:
+    """Redact string values in a Langfuse metadata dict before the trace call.
+
+    Non-string values are passed through unchanged.  Callers should use this
+    for every metadata dict passed to ``langfuse.trace()`` or span helpers so
+    that credentials in request metadata never reach the Langfuse backend.
+    """
+    from app.infra.redaction import redact
+
+    return {k: redact(str(v)) if isinstance(v, str) else v for k, v in meta.items()}
