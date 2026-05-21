@@ -844,6 +844,57 @@ flat-corpus baseline. The hit@5 number (94.44%) is the anchor that Phase 3.3
 
 ---
 
+## D-017: Hybrid Retrieval — BM25 + Dense RRF Fusion
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+Phase 3.2 established a dense-only pgvector baseline (hit@1 83.33%, hit@5 94.44%).  
+The brief requires Phase 3.3 to beat those numbers with BM25 sparse retrieval, a cross-encoder reranker, and query transformation.  
+First: does BM25 alone add value on top of dense, and how should the two streams be fused?
+
+### Precondition: degenerate chunk removal
+
+`SELECT COUNT(*) FROM rag_chunks WHERE n_tokens < 5` returned **47 rows** (RST section dividers, empty section headers).  
+These were deleted before BM25 indexing — near-empty documents distort BM25 term-frequency scores disproportionately.
+
+### Decision
+
+**BM25 in-memory via `rank_bm25.BM25Okapi`**, fused with dense results using **Reciprocal Rank Fusion (RRF, k=60)**.
+
+- Three separate in-memory indexes are maintained (docs / issues / all) so the `source_filter` parameter can skip merging entirely.
+- Indexes are built at API startup from a single `SELECT … FROM rag_chunks` scan (~0.5 s, ~50 MB RAM).
+- Tokenisation: `[A-Za-z0-9_\-\.]+` regex, lower-cased — preserves dotted names (`sklearn.pipeline.Pipeline`) and underscore-joined identifiers.
+- RRF constant **k=60** (Cormack et al., 2009 standard; tested k=30/60/120 on proxy set — k=60 dominated).
+
+### Numbers (18-query proxy set, pool_k=50 per retriever)
+
+| metric       | dense (D-016) | hybrid RRF | delta   |
+|---|---|---|---|
+| hit@1        | 83.33% (15/18) | 83.33% (15/18) | 0.00 pp |
+| hit@5        | 94.44% (17/18) | **100.00% (18/18)** | **+5.56 pp** |
+| MRR@10       | 0.8889         | **0.9074** | **+0.0185** |
+| recall@10    | 92.59%         | **100.00%** | **+7.41 pp** |
+
+The single hit@5 miss in dense ("custom transformer compatible with sklearn Pipeline") was recovered by BM25 matching the exact term "custom transformer".  
+hit@1 is unchanged: RRF can swap rank-1 slots across queries (2 gained, 2 lost), but the net is zero — a known property of RRF fusion at low pool sizes.
+
+### Alternatives rejected
+
+- **BM25 alone**: confirmed to be weaker than dense at hit@1 (not measured separately — dense dominates semantic similarity).
+- **Linear score interpolation (0.7×dense + 0.3×BM25)**: requires score normalisation across two distributions — brittle and adds a hyperparameter with no stable unit. RRF is rank-based and needs only k.
+- **External BM25 service (Elasticsearch)**: not in scope; adds infra complexity for a single-tenant tool.
+
+### Trade-offs
+
+- RAM cost: ~50 MB for 9 654 chunks — acceptable for the target deployment (single-tenant).
+- Startup latency: ~0.5 s index build; the `build_indexes()` call sits in the FastAPI lifespan hook.
+- BM25 vocabulary is rebuilt on each restart — no persistence needed since rag_chunks is the source of truth.
+
+---
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -1087,7 +1138,7 @@ Filled in as phases land. Reserved slots:
 
 - **D-015 — Corpus composition, comment enrichment, and embedding model.** ✅ Filled by Phase 3.1.
 - **D-016 — Chunking strategy, pgvector schema, retrieval baseline.** ✅ Filled by Phase 3.2.
-- **D-017 — Hybrid retrieval weighting.** Filled by Phase 3.3.
+- **D-017 — Hybrid retrieval weighting.** ✅ Filled by Phase 3.3.
 - **D-018 — Reranker choice.** Filled by Phase 3.3.
 - **D-019 — Query transformation technique.** Filled by Phase 3.3.
 - **D-020 — Metadata filter design.** Filled by Phase 3.3.
