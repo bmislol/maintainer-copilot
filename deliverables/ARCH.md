@@ -238,7 +238,7 @@ The artifact contract pattern (refuse-to-boot on SHA mismatch from D-009) applie
 | Sparse retrieval | BM25Okapi (rank_bm25), three in-memory indexes (docs/issues/all), built at startup in ~0.5 s / ~50 MB RAM. Degenerate chunks (n_tokens < 5) deleted before indexing. | Phase 3.3 (D-017) |
 | Dense + sparse weighting | RRF (k=60) — no tuned weights, rank-based fusion. Hybrid gains: hit@5 94.44% → 100.00% (+5.56 pp), MRR@10 0.8889 → 0.9074, recall@10 92.59% → 100.00% on 18-query proxy set. | Phase 3.3 (D-017) |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2`, inline singleton (not modelserver). **Not used by default** — domain mismatch with scikit-learn docs/issues causes regression (hit@1 83.33% → 44.44%). Available as `use_rerank=True` flag in RAGPipeline. | Phase 3.3 (D-018) |
-| Query transformation | HyDE augment (not replace): three-stream RRF — dense(query) + dense(hyde_passage) + BM25(query). HyDE via `claude-haiku-4-5`, ≤256 tokens. `hyde_transform()` accepts caller-provided `AsyncAnthropic` client. | Phase 3.3 (D-019) |
+| Query transformation | HyDE augment (not replace): three-stream RRF — dense(query) + dense(hyde_passage) + BM25(query). Gains over hybrid: hit@1 83.33% → 88.89% (+5.56 pp), MRR@10 0.9074 → 0.9444. HyDE via `claude-haiku-4-5`, ≤256 tokens. `use_hyde=True` default. | Phase 3.3 (D-019) |
 | Metadata filtering | `SourceFilterLiteral["docs","issues","all"]` on `RAGPipeline`. Maps to pgvector WHERE clause + BM25 index selection. Zero-overhead filter since three BM25 indexes are pre-built. | Phase 3.3 (D-020) |
 
 ## 12. Tracing and Logging

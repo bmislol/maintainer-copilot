@@ -1,14 +1,17 @@
-"""Retrieval benchmark — Phase 3.2 baseline + Phase 3.3 hybrid comparison.
+"""Retrieval benchmark — Phase 3.2 baseline + Phase 3.3 full comparison.
 
 Measures hit@1, hit@5, MRR@10, and recall@10 for:
-  - dense  : pgvector cosine similarity only (Phase 3.2 anchor — D-016)
-  - hybrid : dense + BM25 RRF fusion (Phase 3.3 — D-017)
+  - dense    : pgvector cosine similarity only (Phase 3.2 anchor — D-016)
+  - hybrid   : dense + BM25 RRF fusion (Phase 3.3 — D-017)
+  - reranked : hybrid + cross-encoder rerank (Phase 3.3 — D-018)
+  - hyde     : dense(query) + dense(hyde_passage) + BM25(query) → RRF (D-019)
 
 The 18 queries are copied verbatim from scripts/benchmark_embeddings.py
 (Phase 3.1) to ensure apples-to-apples comparison.
 
 Run from backend/:
     DATABASE_URL=postgresql://copilot:copilot-dev-password@localhost:5432/copilot \\
+    ANTHROPIC_API_KEY=sk-ant-... \\
         uv run python scripts/benchmark_retrieval.py
 """
 
@@ -22,6 +25,8 @@ from typing import Any
 
 import numpy as np
 import psycopg2
+from anthropic import Anthropic
+from anthropic.types import TextBlock
 from pgvector.psycopg2 import register_vector
 from rank_bm25 import BM25Okapi
 
@@ -218,6 +223,30 @@ def _recall(top_keys: list[str], relevant: list[str]) -> float:
 
 
 # ---------------------------------------------------------------------------
+# HyDE helper (sync wrapper for benchmark use)
+# ---------------------------------------------------------------------------
+
+_HYDE_SYSTEM = (
+    "You are an expert on scikit-learn.  "
+    "Write a short passage (3–6 sentences) that would appear in documentation "
+    "or a GitHub issue and directly answers the user's question.  "
+    "Do not add headings or bullet points — plain prose only."
+)
+
+
+def hyde_passage_sync(query: str, client: Anthropic) -> str:
+    """Generate a hypothetical passage for the query (synchronous)."""
+    response = client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=256,
+        system=_HYDE_SYSTEM,
+        messages=[{"role": "user", "content": query}],
+    )
+    texts = [b.text for b in response.content if isinstance(b, TextBlock)]
+    return texts[0] if texts else ""
+
+
+# ---------------------------------------------------------------------------
 # Benchmark runner
 # ---------------------------------------------------------------------------
 
@@ -251,12 +280,16 @@ def run_benchmark(
     cur: Any,
     bm25_indexes: dict[str, tuple[BM25Okapi, list[str]]],
     mode: str,
+    anthropic_client: Anthropic | None = None,
 ) -> dict[str, Any]:
     """Run all 18 queries for a given mode.
 
-    mode: "dense" | "hybrid" | "reranked"
+    mode: "dense" | "hybrid" | "reranked" | "hyde"
+    anthropic_client: required for mode="hyde".
     Returns a dict with aggregated metrics and per-query breakdown.
     """
+    if mode == "hyde" and anthropic_client is None:
+        raise ValueError("anthropic_client is required for mode='hyde'")
     pool_k = 50
 
     h1 = h5 = mrr10_sum = rec10_sum = 0.0
@@ -276,29 +309,46 @@ def run_benchmark(
             if key not in dense_key_text:
                 dense_key_text[key] = text
 
+        bm25_bm, bm25_keys = bm25_indexes["all"]
+        bm25_ids = bm25_search(bm25_bm, bm25_keys, query, k=pool_k)
+
         if mode == "dense":
             top10 = dense_ids[:10]
-        elif mode in ("hybrid", "reranked"):
-            bm25_bm, bm25_keys = bm25_indexes["all"]
-            bm25_ids = bm25_search(bm25_bm, bm25_keys, query, k=pool_k)
+        elif mode == "hybrid":
             fused = rrf_fuse([dense_ids, bm25_ids], k=pool_k)
-            if mode == "hybrid":
-                top10 = fused[:10]
-            else:
-                # For sources not in dense results, fetch chunk_index=0 text.
-                extra_keys = [k for k in fused if k not in dense_key_text]
-                if extra_keys:
-                    extra_map = _fetch_chunks_by_key(cur, extra_keys)
-                    for k, v in extra_map.items():
-                        dense_key_text[k] = str(v["text"])
-
-                candidates: list[dict[str, object]] = [
-                    {"source_type": k.split(":", 1)[0], "source_id": k.split(":", 1)[1], "text": dense_key_text[k]}
-                    for k in fused
-                    if k in dense_key_text
-                ]
-                reranked = rerank_chunks(query, candidates, top_k=10)
-                top10 = [f"{c['source_type']}:{c['source_id']}" for c in reranked]
+            top10 = fused[:10]
+        elif mode == "reranked":
+            fused = rrf_fuse([dense_ids, bm25_ids], k=pool_k)
+            # For sources not in dense results, fetch chunk_index=0 text.
+            extra_keys = [k for k in fused if k not in dense_key_text]
+            if extra_keys:
+                extra_map = _fetch_chunks_by_key(cur, extra_keys)
+                for k, v in extra_map.items():
+                    dense_key_text[k] = str(v["text"])
+            candidates: list[dict[str, object]] = [
+                {
+                    "source_type": k.split(":", 1)[0],
+                    "source_id": k.split(":", 1)[1],
+                    "text": dense_key_text[k],
+                }
+                for k in fused
+                if k in dense_key_text
+            ]
+            reranked = rerank_chunks(query, candidates, top_k=10)
+            top10 = [f"{c['source_type']}:{c['source_id']}" for c in reranked]
+        elif mode == "hyde":
+            # Three-stream: dense(query) + dense(hyde) + BM25(query) → RRF
+            assert anthropic_client is not None  # guaranteed by pre-check
+            hyde_text = hyde_passage_sync(query, anthropic_client)
+            hyde_emb = embed_query(hyde_text)
+            hyde_rows = dense_search(cur, hyde_emb, k=pool_k)
+            hyde_ids = [key for key, _ in hyde_rows]
+            # Update best-text map with HyDE results (don't overwrite existing)
+            for key, text in hyde_rows:
+                if key not in dense_key_text:
+                    dense_key_text[key] = text
+            fused = rrf_fuse([dense_ids, hyde_ids, bm25_ids], k=pool_k)
+            top10 = fused[:10]
         else:
             raise ValueError(f"Unknown mode: {mode!r}")
 
@@ -357,6 +407,18 @@ def _print_results(res: dict[str, Any]) -> None:
         print(f"    [@1{m1}][@5{m5}] {pq['query'][:55]}")
 
 
+def _anthropic_client() -> Anthropic:
+    import os
+
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise SystemExit(
+            "ANTHROPIC_API_KEY env var not set — required for HyDE mode.\n"
+            "Example: ANTHROPIC_API_KEY=sk-ant-... uv run python scripts/benchmark_retrieval.py"
+        )
+    return Anthropic(api_key=key)
+
+
 def main() -> None:
     url = _db_url()
     conn = psycopg2.connect(url)
@@ -376,7 +438,9 @@ def main() -> None:
 
     print("Loading BM25 indexes …")
     bm25_indexes = _load_bm25_indexes(cur)
-    print(f"  docs={len(bm25_indexes['docs'][1])}  issues={len(bm25_indexes['issues'][1])}  all={len(bm25_indexes['all'][1])}")
+    print(
+        f"  docs={len(bm25_indexes['docs'][1])}  issues={len(bm25_indexes['issues'][1])}  all={len(bm25_indexes['all'][1])}"
+    )
     print()
 
     dense_res = run_benchmark(cur, bm25_indexes, mode="dense")
@@ -384,6 +448,10 @@ def main() -> None:
 
     print("Warming up cross-encoder reranker …")
     reranked_res = run_benchmark(cur, bm25_indexes, mode="reranked")
+
+    print("Running HyDE augment benchmark (calls Anthropic API) …")
+    anthropic = _anthropic_client()
+    hyde_res = run_benchmark(cur, bm25_indexes, mode="hyde", anthropic_client=anthropic)
 
     conn.close()
 
@@ -404,12 +472,20 @@ def main() -> None:
     _print_results(reranked_res)
 
     print(sep)
-    print("DELTA (reranked − dense)")
+    print("HYBRID + HyDE 3-STREAM (Phase 3.3 — D-019)")
     print(sep)
+    _print_results(hyde_res)
+
+    print(sep)
+    print("DELTA vs dense baseline")
+    print(sep)
+    header = f"  {'metric':<14}  {'hybrid':>10}  {'reranked':>10}  {'hyde':>10}"
+    print(header)
     for metric in ("hit_at_1", "hit_at_5", "mrr_at_10", "recall_at_10"):
-        d_hybrid = float(hybrid_res[metric]) - float(dense_res[metric])
-        d_rerank = float(reranked_res[metric]) - float(dense_res[metric])
-        print(f"  {metric:<14}: hybrid {d_hybrid:+.4f}  reranked {d_rerank:+.4f}")
+        d_hy = float(hybrid_res[metric]) - float(dense_res[metric])
+        d_re = float(reranked_res[metric]) - float(dense_res[metric])
+        d_hd = float(hyde_res[metric]) - float(dense_res[metric])
+        print(f"  {metric:<14}  {d_hy:>+10.4f}  {d_re:>+10.4f}  {d_hd:>+10.4f}")
 
     out = Path("benchmark_retrieval_results.json")
     out.write_text(
@@ -420,6 +496,7 @@ def main() -> None:
                 "dense": dense_res,
                 "hybrid": hybrid_res,
                 "reranked": reranked_res,
+                "hyde": hyde_res,
             },
             indent=2,
         )

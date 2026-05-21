@@ -68,9 +68,7 @@ async def hybrid_search(
         source_type_param = "issue"
 
     # 1. Dense retrieval
-    dense_results = await dense_search(
-        session, query, k=pool_k, source_type=source_type_param
-    )
+    dense_results = await dense_search(session, query, k=pool_k, source_type=source_type_param)
     dense_ids = [str(r["chunk_id"]) for r in dense_results]
 
     # 2. BM25 sparse retrieval
