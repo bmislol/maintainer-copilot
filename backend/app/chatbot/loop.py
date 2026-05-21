@@ -1,4 +1,4 @@
-"""Tool-calling loop — Phase 4.2.
+"""Tool-calling loop — Phase 4.2 / updated Phase 4.3.
 
 Standard Anthropic tool-use pattern, capped at MAX_ROUNDS to prevent
 runaway loops. Yields text delta strings as an async generator so the
@@ -6,6 +6,12 @@ caller can stream them directly to the SSE response.
 
 Round budget (D-034): 5 rounds. In practice every tested query resolves in
 1-2 rounds. The cap is a hard safety rail, not a normal operating ceiling.
+
+Phase 4.3 changes:
+- Accepts conversation_id and redis_client so Redis history is loaded and
+  written here (keeping HTTP concerns in the service layer above).
+- Passes user_id / request_id / trace_id through to execute_tool so the
+  write_memory executor can attribute long-term writes correctly.
 
 Layer: app/chatbot/
 Used by: app/services/chat_service.py
@@ -15,15 +21,18 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
 from anthropic import AsyncAnthropic
 from anthropic.types import Message, MessageParam, ToolUseBlock
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chatbot.tools import TOOL_SCHEMAS, execute_tool
+from app.memory.short_term import append_message, get_history
 
 logger = logging.getLogger(__name__)
 
@@ -35,24 +44,40 @@ async def run_stream(
     *,
     system_prompt: str,
     user_message: str,
+    conversation_id: str,
     anthropic_client: AsyncAnthropic,
     http_client: httpx.AsyncClient,
     session: AsyncSession,
+    redis_client: Redis,
+    user_id: uuid.UUID,
+    request_id: str = "",
+    trace_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """Run the tool-calling loop and yield text delta strings.
+
+    Loads conversation history from Redis at the start of each turn,
+    appends the new user message, then writes the assistant response back
+    to Redis once streaming completes.
 
     Yields individual text chunks as Claude produces them.
     Raises on unrecoverable Anthropic API errors.
     """
-    messages: list[MessageParam] = [{"role": "user", "content": user_message}]
+    # Load history and append the incoming user message.
+    history = await get_history(redis_client, conversation_id)
+    await append_message(redis_client, conversation_id, "user", user_message)
+
+    # Build the messages array Claude will see: history + current user turn.
+    messages: list[MessageParam] = [
+        *history,  # type: ignore[list-item]
+        {"role": "user", "content": user_message},
+    ]
+
+    full_response_parts: list[str] = []
 
     for round_num in range(MAX_ROUNDS):
         logger.debug("chatbot loop round %d", round_num + 1)
 
-        # ----------------------------------------------------------------
-        # Check if this is the last round — if so, don't offer tools so
-        # Claude is forced to give a text response rather than call more tools.
-        # ----------------------------------------------------------------
+        # On the final round pass no tools so Claude is forced to end_turn.
         tools_for_this_round = TOOL_SCHEMAS if round_num < MAX_ROUNDS - 1 else []
 
         async with anthropic_client.messages.stream(
@@ -68,11 +93,9 @@ async def run_stream(
         # Tool-use round: execute all tool calls, then loop back.
         # ----------------------------------------------------------------
         if response.stop_reason == "tool_use":
-            # Append assistant's tool-use turn to the conversation.
             assistant_content = response.content
             messages.append({"role": "assistant", "content": assistant_content})
 
-            # Execute every tool call in this response and collect results.
             tool_results: list[dict[str, Any]] = []
             for block in assistant_content:
                 if not isinstance(block, ToolUseBlock):
@@ -84,6 +107,9 @@ async def run_stream(
                     http_client=http_client,
                     session=session,
                     anthropic_client=anthropic_client,
+                    user_id=user_id,
+                    request_id=request_id,
+                    trace_id=trace_id,
                 )
                 tool_results.append(
                     {
@@ -94,17 +120,19 @@ async def run_stream(
                 )
 
             messages.append({"role": "user", "content": tool_results})  # type: ignore[typeddict-item]
-            continue  # back to the top of the loop
+            continue
 
         # ----------------------------------------------------------------
-        # End-turn: stream the text response and exit.
+        # End-turn: yield text, persist to Redis, exit.
         # ----------------------------------------------------------------
         if response.stop_reason == "end_turn":
             for block in response.content:
                 if hasattr(block, "text"):
-                    # Yield the full text from this block; the endpoint
-                    # wraps individual tokens in SSE events.
+                    full_response_parts.append(block.text)
                     yield block.text
+
+            full_response = "".join(full_response_parts)
+            await append_message(redis_client, conversation_id, "assistant", full_response)
             return
 
         # Unexpected stop_reason — log and bail.

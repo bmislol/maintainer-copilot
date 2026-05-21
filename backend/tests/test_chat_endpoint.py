@@ -27,6 +27,7 @@ def _setup_app_state() -> Any:
     """Provide minimal app.state and override infra deps for all tests in this module."""
     app.state.anthropic_client = AsyncMock()
     app.state.http_client = AsyncMock()
+    app.state.redis_client = MagicMock()
     app.dependency_overrides[get_async_session] = _mock_session
 
     def _test_jwt_strategy() -> JWTStrategy[User, int]:  # type: ignore[type-arg]
@@ -110,3 +111,4 @@ async def test_send_message_with_conversation_id(auth_override: None) -> None:  
 
     assert captured_kwargs.get("conversation_id") == "12345678-1234-1234-1234-123456789012"
     assert captured_kwargs.get("user_message") == "hello"
+    assert captured_kwargs.get("user_id") is not None
