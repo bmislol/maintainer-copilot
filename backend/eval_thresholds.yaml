@@ -15,6 +15,9 @@ classification:
   per_class_min_f1: 0.50   # no single class may drop below this
 
 rag:
-  # Phase 3.4 will populate.
-  hit_at_5: 0
-  reciprocal_rank: 0
+  # RAGPipeline(use_hyde=True, top_k=10) against 24-triple golden set.
+  # Measured on 2026-05-21: hit@5=0.9583, MRR@10=0.8532.
+  # Thresholds set at measured − 10 pp (same methodology as D-013).
+  # See DECISIONS D-021 for full methodology and benchmark breakdown.
+  hit_at_5: 0.8583
+  reciprocal_rank: 0.7532
