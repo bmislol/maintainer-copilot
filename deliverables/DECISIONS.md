@@ -895,6 +895,57 @@ hit@1 is unchanged: RRF can swap rank-1 slots across queries (2 gained, 2 lost),
 
 ---
 
+## D-018: Cross-Encoder Reranker Choice and Pipeline Default
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+Phase 3.3 requires a cross-encoder reranker over the top-k candidates from hybrid retrieval.
+The reranker must be chosen, measured against the hybrid baseline, and a pipeline default set.
+
+### Decision
+
+**Model**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (22 M parameters, ~90 MB, CPU-only).
+
+**Deployed inline in `app/rag/reranker.py`** as a singleton loaded at first call.  
+Not delegated to modelserver: no GPU requirement, one extra HTTP hop on the hot path is not justified (D-018 rationale).
+
+### Numbers (18-query proxy set, pool_k=50, rerank top-10)
+
+| metric       | dense (D-016) | hybrid (D-017) | hybrid+rerank | reranked delta vs dense |
+|---|---|---|---|---|
+| hit@1        | 83.33%  | 83.33% | **44.44%** | −38.89 pp |
+| hit@5        | 94.44%  | 100.00% | 83.33% | −11.11 pp |
+| MRR@10       | 0.8889  | 0.9074  | 0.5847 | −0.3042 |
+| recall@10    | 92.59%  | 100.00% | 87.04% | −5.55 pp |
+
+### Finding: domain mismatch regression
+
+ms-marco-MiniLM-L-6-v2 is trained on MS-MARCO (web search passages).  
+This corpus consists of scikit-learn RST documentation sections and GitHub issue bodies — structurally different from web search results.  
+The cross-encoder consistently re-ranks documentation chunks to the bottom, presumably because they lack the "answer directly follows question" pattern that MS-MARCO training examples have.
+
+Notably, the reranker improves on issue queries but hurts on documentation queries:
+
+- **Issue @1** (bottom 9 queries): slight degradation from 9/9 → 4/9  
+- **Doc @1** (top 9 queries): degradation from 7/9 → 4/9 (structural text mismatch)
+
+### Consequence for pipeline default
+
+The `RAGPipeline` in `app/rag/pipeline.py` will use **hybrid retrieval as the default**.  
+The reranker is available as an opt-in flag (`rerank=True`) for callers who want to experiment.  
+A domain-adapted cross-encoder (or in-domain training on this corpus) would be needed to see gains.
+
+### Alternatives rejected
+
+- **Larger cross-encoder** (ms-marco-MiniLM-L-12-v2): ~50% more parameters, same domain mismatch.
+- **ColBERT** (late-interaction): requires indexing infrastructure not available in this stack.
+- **No reranker at all**: ship the code and document the finding; the Phase 3.3 brief specifies reranker as a deliverable.
+
+---
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -1139,7 +1190,7 @@ Filled in as phases land. Reserved slots:
 - **D-015 — Corpus composition, comment enrichment, and embedding model.** ✅ Filled by Phase 3.1.
 - **D-016 — Chunking strategy, pgvector schema, retrieval baseline.** ✅ Filled by Phase 3.2.
 - **D-017 — Hybrid retrieval weighting.** ✅ Filled by Phase 3.3.
-- **D-018 — Reranker choice.** Filled by Phase 3.3.
+- **D-018 — Reranker choice.** ✅ Filled by Phase 3.3.
 - **D-019 — Query transformation technique.** Filled by Phase 3.3.
 - **D-020 — Metadata filter design.** Filled by Phase 3.3.
 - **D-021 — RAG eval thresholds and judge model.** Filled by Phase 3.4.

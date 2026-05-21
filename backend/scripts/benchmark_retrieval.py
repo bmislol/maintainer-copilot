@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.rag.bm25_index import tokenize
 from app.rag.embedder import embed_query
 from app.rag.hybrid_retriever import RRF_K
+from app.rag.reranker import rerank as rerank_chunks
 
 # ---------------------------------------------------------------------------
 # Ground-truth proxy set — verbatim from scripts/benchmark_embeddings.py
@@ -129,19 +130,23 @@ def dense_search(
     cur: Any,
     q_emb: np.ndarray[Any, Any],
     k: int,
-) -> list[str]:
-    """Return top-k chunk_ids by cosine similarity."""
+) -> list[tuple[str, str]]:
+    """Return top-k (source_key, text) pairs by cosine similarity.
+
+    source_key has format 'source_type:source_id'.
+    Multiple rows for the same source_key may be returned (one per chunk).
+    """
     vec_str = "[" + ",".join(f"{float(x):.8f}" for x in q_emb) + "]"
     cur.execute(
         """
-        SELECT source_type || ':' || source_id AS key
+        SELECT source_type || ':' || source_id AS key, text
         FROM   rag_chunks
         ORDER  BY embedding <=> %s::vector
         LIMIT  %s
         """,
         (vec_str, k),
     )
-    return [row[0] for row in cur.fetchall()]
+    return [(row[0], row[1]) for row in cur.fetchall()]
 
 
 def _load_bm25_indexes(
@@ -217,13 +222,39 @@ def _recall(top_keys: list[str], relevant: list[str]) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _fetch_chunks_by_key(cur: Any, keys: list[str]) -> dict[str, dict[str, Any]]:
+    """Fetch one representative chunk per source_type:source_id key.
+
+    Uses chunk_index=0 (body/first-section) as the representative chunk.
+    This gives the reranker exactly one candidate per source — same cardinality
+    as the fused list — so it ranks sources rather than chunks.
+    """
+    if not keys:
+        return {}
+    cur.execute(
+        """
+        SELECT DISTINCT ON (source_type, source_id)
+               source_type, source_id, text
+        FROM   rag_chunks
+        WHERE  source_type || ':' || source_id = ANY(%s)
+        ORDER  BY source_type, source_id, chunk_index ASC
+        """,
+        (keys,),
+    )
+    return {
+        f"{row[0]}:{row[1]}": {"source_type": row[0], "source_id": row[1], "text": row[2]}
+        for row in cur.fetchall()
+    }
+
+
 def run_benchmark(
     cur: Any,
     bm25_indexes: dict[str, tuple[BM25Okapi, list[str]]],
     mode: str,
 ) -> dict[str, Any]:
-    """Run all 18 queries for a given mode ('dense' or 'hybrid').
+    """Run all 18 queries for a given mode.
 
+    mode: "dense" | "hybrid" | "reranked"
     Returns a dict with aggregated metrics and per-query breakdown.
     """
     pool_k = 50
@@ -234,19 +265,45 @@ def run_benchmark(
     t0 = time.time()
     for query, relevant in QUERIES:
         q_emb = embed_query(query)
-        dense_ids = dense_search(cur, q_emb, k=pool_k)
+        dense_rows = dense_search(cur, q_emb, k=pool_k)
+
+        # Full list with duplicates — used for RRF (duplicates boost the source score).
+        dense_ids = [key for key, _ in dense_rows]
+
+        # Best-text map: first (highest-ranked) chunk text per source for reranking.
+        dense_key_text: dict[str, str] = {}
+        for key, text in dense_rows:
+            if key not in dense_key_text:
+                dense_key_text[key] = text
 
         if mode == "dense":
             top10 = dense_ids[:10]
-            top5 = dense_ids[:5]
-            top1 = dense_ids[:1]
-        else:
+        elif mode in ("hybrid", "reranked"):
             bm25_bm, bm25_keys = bm25_indexes["all"]
             bm25_ids = bm25_search(bm25_bm, bm25_keys, query, k=pool_k)
-            fused = rrf_fuse([dense_ids, bm25_ids], k=10)
-            top10 = fused
-            top5 = fused[:5]
-            top1 = fused[:1]
+            fused = rrf_fuse([dense_ids, bm25_ids], k=pool_k)
+            if mode == "hybrid":
+                top10 = fused[:10]
+            else:
+                # For sources not in dense results, fetch chunk_index=0 text.
+                extra_keys = [k for k in fused if k not in dense_key_text]
+                if extra_keys:
+                    extra_map = _fetch_chunks_by_key(cur, extra_keys)
+                    for k, v in extra_map.items():
+                        dense_key_text[k] = str(v["text"])
+
+                candidates: list[dict[str, object]] = [
+                    {"source_type": k.split(":", 1)[0], "source_id": k.split(":", 1)[1], "text": dense_key_text[k]}
+                    for k in fused
+                    if k in dense_key_text
+                ]
+                reranked = rerank_chunks(query, candidates, top_k=10)
+                top10 = [f"{c['source_type']}:{c['source_id']}" for c in reranked]
+        else:
+            raise ValueError(f"Unknown mode: {mode!r}")
+
+        top5 = top10[:5]
+        top1 = top10[:1]
 
         hit1 = _hit(top1, relevant)
         hit5 = _hit(top5, relevant)
@@ -325,6 +382,9 @@ def main() -> None:
     dense_res = run_benchmark(cur, bm25_indexes, mode="dense")
     hybrid_res = run_benchmark(cur, bm25_indexes, mode="hybrid")
 
+    print("Warming up cross-encoder reranker …")
+    reranked_res = run_benchmark(cur, bm25_indexes, mode="reranked")
+
     conn.close()
 
     sep = "=" * 60
@@ -339,21 +399,27 @@ def main() -> None:
     _print_results(hybrid_res)
 
     print(sep)
-    print("DELTA (hybrid − dense)")
+    print("HYBRID + RERANK (Phase 3.3 — D-018)")
+    print(sep)
+    _print_results(reranked_res)
+
+    print(sep)
+    print("DELTA (reranked − dense)")
     print(sep)
     for metric in ("hit_at_1", "hit_at_5", "mrr_at_10", "recall_at_10"):
-        delta = float(hybrid_res[metric]) - float(dense_res[metric])
-        sign = "+" if delta >= 0 else ""
-        print(f"  {metric:<14}: {sign}{delta:+.4f}")
+        d_hybrid = float(hybrid_res[metric]) - float(dense_res[metric])
+        d_rerank = float(reranked_res[metric]) - float(dense_res[metric])
+        print(f"  {metric:<14}: hybrid {d_hybrid:+.4f}  reranked {d_rerank:+.4f}")
 
     out = Path("benchmark_retrieval_results.json")
     out.write_text(
         json.dumps(
             {
-                "phase": "3.3-hybrid",
+                "phase": "3.3",
                 "corpus_chunks": total_chunks,
                 "dense": dense_res,
                 "hybrid": hybrid_res,
+                "reranked": reranked_res,
             },
             indent=2,
         )
