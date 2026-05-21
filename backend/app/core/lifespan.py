@@ -7,15 +7,19 @@ Refuses to boot if:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import yaml
+from anthropic import AsyncAnthropic
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.config import bootstrap_settings
 from app.core.logging import configure_logging
 from app.infra.tracing import (
     LangfuseUnreachableError,
@@ -100,10 +104,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db_engine = engine
     app.state.db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
+    # Shared HTTP client for modelserver calls — one connection pool for the
+    # entire process lifetime. Timeout generous enough for model inference.
+    app.state.http_client = httpx.AsyncClient(
+        base_url=bootstrap_settings.modelserver_url,
+        timeout=httpx.Timeout(30.0),
+    )
+
+    # Anthropic async client — API key from Vault.
+    app.state.anthropic_client = AsyncAnthropic(api_key=secrets.anthropic.api_key)
+
+    # BM25 indexes — built synchronously from rag_chunks using psycopg2.
+    # Strip the +asyncpg driver prefix so psycopg2 can parse the URL.
+    from app.rag.bm25_index import build_indexes
+
+    psycopg2_url = secrets.database.url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, build_indexes, psycopg2_url)
+
     logger.info("api startup complete")
 
     yield
 
-    logger.info("api shutdown — flushing langfuse and disposing db engine")
+    logger.info("api shutdown — closing clients and disposing db engine")
+    await app.state.http_client.aclose()
+    await app.state.anthropic_client.close()
     await app.state.db_engine.dispose()
     shutdown_langfuse()

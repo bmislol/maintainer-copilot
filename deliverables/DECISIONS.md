@@ -1420,6 +1420,41 @@ Use `is_superuser: bool` (fastapi-users built-in). `admin = True`, `user = False
 
 If a third role is needed in the future (e.g. `moderator`), the boolean model requires a migration to add a role column. Acceptable for a 5-day project scoped to two roles.
 
+## D-034: Tool-calling loop design — round cap and model choice
+
+Status: Accepted
+Date: 2026-05-22
+
+### Context
+
+The chatbot needs to call up to five tools per user message (classify, NER, summarize, RAG search, write memory). Without a round cap, a misbehaving tool response could cause the loop to spin indefinitely.
+
+### Decision
+
+Single tool-calling loop (`app/chatbot/loop.py`) using the standard Anthropic tool-use pattern:
+- **Model:** `claude-haiku-4-5` — fastest and cheapest Anthropic model; classification/triage tasks do not require Sonnet-level reasoning.
+- **MAX_ROUNDS = 5** — hard ceiling on tool-calling iterations. On the final round, `tools` is passed as an empty list so Claude is forced to produce a text response rather than another tool call.
+- **Single async generator** — yields text deltas as Claude produces them; the HTTP layer wraps them in SSE events.
+
+### Why 5 rounds?
+
+Prevents infinite tool loops — a safety rail, not a normal operating ceiling. In practice every tested query resolves in 1–2 rounds. Round budget:
+- Round 1: Claude calls 1–2 tools (classify + NER, or search)
+- Round 2: Claude synthesizes and responds (`end_turn`)
+- Rounds 3–5: reserved for edge cases (multi-step search → clarify → respond)
+
+### Alternatives Considered
+
+- **No cap:** Rejected — runaway loops would exhaust token budget and block the response.
+- **Cap = 3:** Too tight; complex queries that need classify + search + summarize would hit the ceiling in normal operation.
+- **Cap = 10:** Too generous; increases worst-case latency and cost without measurable benefit on our query set.
+
+### Trade-offs
+
+Capping at 5 rounds means very complex multi-step queries could hit the ceiling and get the fallback message. Acceptable for the triage use case where questions are typically single-intent.
+
+---
+
 ## Pending Decisions
 
 Filled in as phases land. Reserved slots:
@@ -1433,6 +1468,7 @@ Filled in as phases land. Reserved slots:
 - **D-021 — RAG eval thresholds and judge model.** Filled by Phase 3.4.
 - **D-022 — Redaction pattern list.** ✅ Filled by Phase 3.5.
 - **D-033 — `is_superuser` vs. role column.** ✅ Filled by Phase 4.1.
+- **D-034 — Tool-calling loop design.** ✅ Filled by Phase 4.2.
 - **D-023 — Short-term memory TTL and justification.** Filled by Phase 4.3.
 - **D-024 — Long-term memory type (episodic / semantic / procedural) and defense.** Filled by Phase 4.3.
 - **D-025 — Widget bundle target size and any trade-offs accepted to hit it.** Filled by Phase 4.5.

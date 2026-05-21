@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
+from app.api.chat import router as chat_router
 from app.api.middleware import RequestContextMiddleware
 from app.core.lifespan import lifespan
 from app.domain.exceptions import CopilotError
@@ -21,6 +22,7 @@ app = FastAPI(
 
 app.add_middleware(RequestContextMiddleware)
 app.include_router(auth_router)
+app.include_router(chat_router)
 
 logger = logging.getLogger(__name__)
 

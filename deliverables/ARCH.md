@@ -102,18 +102,20 @@ This boundary is graded. It will be checked on Friday by being asked to add a ne
 
 ## 5. Core Data Flow: One Chatbot Turn
 
-1. User sends a message through Streamlit or the React widget.
-2. `api` authenticates the user (JWT), resolves a request ID and trace ID, and calls `chat_service.handle_turn(...)`.
-3. `chat_service` loads short-term memory from Redis (recent turns of this conversation) and an optional long-term memory snippet from pgvector (cross-conversation recall).
-4. `chat_service` invokes the single tool-calling Claude loop. The model picks tools: `classify_issue`, `extract_entities`, `summarize_thread`, `retrieve_docs`, `write_memory`.
-5. Tool calls route through `app/services/` to the right adapter:
-   - `classify_issue`, `extract_entities`, `summarize_thread` → `modelserver` HTTP endpoint.
-   - `retrieve_docs` → `app/rag/` (hybrid retrieval, rerank, query transform).
-   - `write_memory` → long-term memory write + audit-log row.
-6. Every LLM call, tool call, and retrieval is a Langfuse span, all rooted at the user message.
-7. Every log line, span attribute, and memory write passes through `app/infra/redaction.py` first.
-8. `chat_service` returns the assistant message; `api` streams it back to the frontend.
-9. Tool failures are caught and recovered. If the classifier endpoint is down, the chatbot says so and falls back; it does not 500.
+Last updated: 2026-05-22 (Phase 4.2 — chatbot core live)
+
+1. User POSTs `{"conversation_id": "<uuid|null>", "message": "<text>"}` to `POST /chat/send` with a Bearer token.
+2. `app/api/chat.py` authenticates via `current_active_user` (fastapi-users), injects `AsyncSession` and reads `anthropic_client` / `http_client` from `app.state`.
+3. The endpoint calls `chat_service.stream_chat_response(...)` and streams the result as SSE events (`text/event-stream`). A final `data: [DONE]` event closes the stream.
+4. `chat_service` (`app/services/chat_service.py`) opens a Langfuse span (`chatbot_turn`), loads the system prompt from disk (cached after first read), and delegates to `app/chatbot/loop.run_stream(...)`.
+5. The tool-calling loop (`app/chatbot/loop.py`, D-034) runs up to **MAX_ROUNDS = 5** iterations using `claude-haiku-4-5`. On each round it calls `anthropic_client.messages.stream(...)` with the current message history and tool schemas. On the final round, `tools=[]` forces `end_turn`.
+6. Tool calls are dispatched by `app/chatbot/tools.execute_tool(...)`:
+   - `classify_issue`, `extract_entities`, `summarize_thread` → `modelserver` HTTP via the shared `httpx.AsyncClient` (stored in `app.state.http_client`).
+   - `retrieve_docs` → `app/rag/pipeline.RAGPipeline` (hybrid retrieval, rerank, query transform).
+   - `write_memory` → stub returning `{"status": "ok"}` until Phase 4.3.
+7. Tool executor failures return `{"error": "…"}` — Claude relays them gracefully; the API never 500s on a tool failure.
+8. Every LLM call and tool result is under the Langfuse span opened in step 4.
+9. `loop.run_stream` yields text delta strings; `chat_service` re-yields them; the endpoint wraps each in an SSE `data:` line. Phase 4.3 will add Redis short-term memory and pgvector long-term recall between steps 4 and 5.
 
 ## 6. Authentication and Authorization
 
@@ -138,7 +140,7 @@ Last updated: 2026-05-21 (Phase 4.1)
 
 ## 7. Endpoint Inventory
 
-Last updated: 2026-05-21 (Phase 4.1 — auth routes live; chatbot routes added by Phase 4.2)
+Last updated: 2026-05-22 (Phase 4.2 — `/chat/send` live)
 
 | Method | Endpoint | Roles | Notes |
 |---|---|---|---|
@@ -147,7 +149,7 @@ Last updated: 2026-05-21 (Phase 4.1 — auth routes live; chatbot routes added b
 | `GET` | `/users/me` | Authenticated | Current user profile. |
 | `PATCH` | `/users/me` | Authenticated | Update email / password. |
 | `GET` | `/healthz` | Public | Liveness probe. |
-| `POST` | `/chat/send` | Authenticated | Send a message; streams assistant reply via SSE. (Phase 4.2) |
+| `POST` | `/chat/send` | Authenticated | Send a message; streams assistant reply via SSE. ✅ Phase 4.2 |
 | `GET` | `/conversations` | Authenticated | List own conversations. (Phase 4.2) |
 | `GET` | `/conversations/{cid}` | Authenticated | Get conversation history. (Phase 4.2) |
 | `DELETE` | `/conversations/{cid}` | Authenticated | Delete conversation (audit-logged). (Phase 4.2) |
