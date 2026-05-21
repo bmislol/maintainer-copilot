@@ -20,6 +20,7 @@ this module testable without live infrastructure.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -216,13 +217,27 @@ async def execute_retrieve_docs(
 
 async def execute_write_memory(
     tool_input: dict[str, Any],
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    request_id: str = "",
+    trace_id: str = "",
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    # Phase 4.3 will replace this stub with real pgvector storage.
-    logger.debug(
-        "write_memory stub called with content length %d", len(tool_input.get("content", ""))
-    )
-    return {"status": "ok", "note": "memory not yet implemented"}
+    from app.memory.long_term import write_entry
+
+    try:
+        entry = await write_entry(
+            session,
+            user_id=user_id,
+            content=tool_input["content"],
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+        return {"status": "ok", "entry_id": str(entry.id)}
+    except Exception as exc:
+        logger.warning("write_memory failed: %s", exc)
+        return {"error": f"write_memory unavailable: {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +260,9 @@ async def execute_tool(
     http_client: httpx.AsyncClient,
     session: AsyncSession,
     anthropic_client: AsyncAnthropic,
+    user_id: uuid.UUID | None = None,
+    request_id: str = "",
+    trace_id: str = "",
 ) -> dict[str, Any]:
     """Dispatch a tool call by name. Always returns a JSON-serialisable dict."""
     executor = _EXECUTORS.get(name)
@@ -255,4 +273,7 @@ async def execute_tool(
         http_client=http_client,
         session=session,
         anthropic_client=anthropic_client,
+        user_id=user_id,
+        request_id=request_id,
+        trace_id=trace_id,
     )

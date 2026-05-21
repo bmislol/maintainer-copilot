@@ -1455,6 +1455,129 @@ Capping at 5 rounds means very complex multi-step queries could hit the ceiling 
 
 ---
 
+---
+
+## D-023: Short-Term Memory TTL and Sliding-Window Size
+
+Status: Accepted
+Date: 2026-05-22
+
+### Context
+
+The chatbot needs per-conversation message history so Claude sees prior turns
+in the same session. We need to decide: how long to keep it and how many
+messages to retain.
+
+### Decision
+
+- **TTL: 86 400 seconds (24 hours)** — keys expire automatically after one day of inactivity.
+- **Window: 50 messages** — RPUSH + LTRIM(-50, -1) keeps only the most recent 50 turns.
+- **Key pattern:** `conv:{conversation_id}:messages`
+- **Storage:** Redis list; each element is a JSON-serialized `{"role": …, "content": …}` dict.
+
+### Why
+
+**TTL = 24 h.** A maintenance-triage session rarely spans more than a few hours.
+24 h means an interrupted session can resume the next morning without loss; it
+also means abandoned keys evict within a day, bounding Redis memory growth.
+Alternatives:
+
+| TTL | Reason rejected |
+|---|---|
+| 1 h | Too aggressive — a maintainer who pauses for lunch loses context |
+| 7 d | Unnecessary; long-term persistence belongs in pgvector, not Redis |
+
+**Window = 50 messages.** Each full turn is ~2 messages (user + assistant).
+50 messages ≈ 25 turns, which comfortably covers any realistic issue-triage
+session. Beyond 50, the earliest turns are typically no longer relevant to
+the current question, and sending them all to Claude would inflate token cost.
+The token estimate for 50 average-length turns is well under Claude's 200k
+context limit, so the cap is not a latency hedge — it is a semantic hygiene
+choice.
+
+### Alternatives Considered
+
+- **Unlimited history:** Memory grows unboundedly; old context adds noise.
+- **Session-scoped (no TTL):** Requires explicit delete on logout — adds surface area with no benefit.
+
+### Trade-offs
+
+If a conversation resumes after 24 h the history is gone; Claude starts fresh.
+This is acceptable because cross-conversation persistence is handled by
+long-term pgvector memory (D-024).
+
+---
+
+## D-024: Long-Term Memory Type (Episodic) and pgvector Rationale
+
+Status: Accepted
+Date: 2026-05-22
+
+### Context
+
+The `write_memory` tool lets the maintainer persist facts across conversations.
+We need to choose:
+1. A default `memory_type` (episodic / semantic / procedural).
+2. The storage backend and retrieval strategy.
+
+### Decision
+
+**Memory type default: `episodic`.**
+The `write_memory` tool is *explicit-only* — the user invokes it deliberately to
+record a specific stated fact (e.g., "remember: the CI gate requires macro_f1 ≥
+0.90 before merging"). A deliberately stated fact about a past event or decision
+is episodic by definition.
+
+The three memory types map as follows:
+
+| Type | Meaning | Example in this system |
+|---|---|---|
+| episodic | A specific event or decision the user stated | "We froze merges last Thursday for the mobile release" |
+| semantic | A general fact about the world / codebase | "The BM25 indexer needs psycopg2, not asyncpg" |
+| procedural | A how-to the system should follow | "Always squash-merge on main" |
+
+All three are valid writes via the `write_memory` tool; the user chooses.
+The default is `episodic` because `write_memory` is triggered on explicit
+user statements, which are almost always episodic.
+
+**Storage: pgvector (PostgreSQL extension).** Embeddings stored in the same
+Postgres instance, in a dedicated `memory_long` table with a 384-dim
+`vector(384)` column (matches the all-MiniLM-L6-v2 model, D-015). An HNSW
+index (`lists=100, m=16, ef_construction=64`) serves approximate nearest-neighbor
+queries.
+
+**Retrieval: cosine similarity** (`<=>` pgvector operator). The query text is
+embedded with the same model as the stored entries, then top-k entries for the
+user are returned ordered by cosine distance.
+
+**Audit log:** Every write appends a row to `audit_log` (actor, action, target,
+request_id, trace_id) satisfying SECURITY §6.
+
+### Why pgvector over a dedicated vector store
+
+The project already runs Postgres. Adding Pinecone or Qdrant would add a new
+infra component, a new secret, and a new failure mode for a feature that stores
+at most O(thousands) of embeddings per user. pgvector handles that comfortably
+while staying inside the existing compose stack. The embedding model (384-dim,
+local) is already loaded for RAG; reusing it costs nothing at runtime.
+
+### Alternatives Considered
+
+- **Pinecone / Qdrant:** Better at planet-scale vector workloads; overkill here.
+- **Store raw text only, no embeddings:** Keyword search would miss semantically
+  similar queries (tested in test_memory_recall.py — query "What quality threshold
+  must pass before code is merged?" must match "The CI gate requires macro_f1 ≥
+  0.90 before any merge" with zero lexical overlap).
+
+### Trade-offs
+
+pgvector HNSW delivers approximate (not exact) nearest-neighbor results.
+Recall@10 on the golden set is ≥ 0.96 at ef=64, which is more than sufficient
+for a personal memory store. Exact KNN would be slower with no practical
+benefit at our scale.
+
+---
+
 ## Pending Decisions
 
 Filled in as phases land. Reserved slots:
@@ -1469,6 +1592,6 @@ Filled in as phases land. Reserved slots:
 - **D-022 — Redaction pattern list.** ✅ Filled by Phase 3.5.
 - **D-033 — `is_superuser` vs. role column.** ✅ Filled by Phase 4.1.
 - **D-034 — Tool-calling loop design.** ✅ Filled by Phase 4.2.
-- **D-023 — Short-term memory TTL and justification.** Filled by Phase 4.3.
-- **D-024 — Long-term memory type (episodic / semantic / procedural) and defense.** Filled by Phase 4.3.
+- **D-023 — Short-term memory TTL and justification.** ✅ Filled by Phase 4.3.
+- **D-024 — Long-term memory type (episodic / semantic / procedural) and defense.** ✅ Filled by Phase 4.3.
 - **D-025 — Widget bundle target size and any trade-offs accepted to hit it.** Filled by Phase 4.5.

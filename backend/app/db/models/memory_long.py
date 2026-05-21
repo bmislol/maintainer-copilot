@@ -1,4 +1,4 @@
-"""Long-term memory table — pgvector-backed. Fields refined by Phase 4.3."""
+"""Long-term memory table — pgvector-backed."""
 
 import uuid
 from datetime import datetime
@@ -19,6 +19,8 @@ class MemoryLong(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     content: Mapped[str] = mapped_column(String, nullable=False)
+    # D-024: episodic = user-stated facts; semantic/procedural reserved.
+    memory_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="episodic")
     # 384-dim: locked by D-015 (sentence-transformers/all-MiniLM-L6-v2).
     embedding: Mapped[list[float]] = mapped_column(Vector(384), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

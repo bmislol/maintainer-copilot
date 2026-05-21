@@ -83,9 +83,27 @@ async def test_summarize_thread_returns_error_on_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_write_memory_stub_returns_ok() -> None:
-    result = await execute_write_memory({"content": "remember this"})
+async def test_write_memory_calls_long_term_and_returns_entry_id() -> None:
+    import uuid
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    from app.domain.memory import MemoryEntry
+
+    fake_entry = MemoryEntry(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        content="remember this",
+        memory_type="episodic",
+        created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    )
+    with patch("app.memory.long_term.write_entry", new=_AsyncMock(return_value=fake_entry)):
+        result = await execute_write_memory(
+            {"content": "remember this"},
+            session=_AsyncMock(),
+            user_id=fake_entry.user_id,
+        )
     assert result["status"] == "ok"
+    assert "entry_id" in result
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
+import redis.asyncio as aioredis
 import yaml
 from anthropic import AsyncAnthropic
 from fastapi import FastAPI
@@ -114,6 +115,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Anthropic async client — API key from Vault.
     app.state.anthropic_client = AsyncAnthropic(api_key=secrets.anthropic.api_key)
 
+    # Redis async client — used for short-term conversation history (Phase 4.3).
+    app.state.redis_client = aioredis.from_url(secrets.redis.url, decode_responses=True)
+
     # BM25 indexes — built synchronously from rag_chunks using psycopg2.
     # Strip the +asyncpg driver prefix so psycopg2 can parse the URL.
     from app.rag.bm25_index import build_indexes
@@ -129,5 +133,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("api shutdown — closing clients and disposing db engine")
     await app.state.http_client.aclose()
     await app.state.anthropic_client.close()
+    await app.state.redis_client.aclose()
     await app.state.db_engine.dispose()
     shutdown_langfuse()

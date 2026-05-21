@@ -166,15 +166,36 @@ Last updated: 2026-05-22 (Phase 4.2 — `/chat/send` live)
 
 ### 8.1 Short-Term (Redis)
 
-The last N turns of the active conversation are held in Redis with an explicit TTL. TTL value and justification: TBD (Phase 4.3).
+Per-conversation message history stored as a Redis list under the key
+`conv:{conversation_id}:messages`. Each element is a JSON-serialized
+`{"role": …, "content": …}` dict.
+
+- **TTL: 86 400 s (24 h)** — covers a full work day; long-term persistence
+  is handled by pgvector (D-023).
+- **Sliding window: 50 messages** — RPUSH + LTRIM(-50, -1) keeps the most
+  recent 50 turns. Older turns add noise without value for triage queries (D-023).
+- **Module:** `app/memory/short_term.py` — `append_message`, `get_history`, `clear`.
+- **Injection:** the Redis client is passed in as a parameter; no global import.
 
 ### 8.2 Long-Term (pgvector)
 
-Cross-conversation recall lives in Postgres with pgvector. Memory type (episodic / semantic / procedural) and the defense for that choice: TBD (Phase 4.3).
+Cross-conversation recall lives in Postgres with the pgvector extension.
+Memories are stored in the `memory_long` table with a `vector(384)` embedding
+column (all-MiniLM-L6-v2, D-015). An HNSW index serves approximate KNN queries
+using cosine distance (`<=>` operator).
 
-Every long-term write produces an `audit_log` row: `actor`, `action`, `target`, `timestamp`, `request_id`, `trace_id`.
+**Memory type: episodic (default).** The `write_memory` tool is explicit-only
+(user-stated facts). Stated facts are episodic by definition. The column also
+accepts `semantic` and `procedural` for user-directed overrides. Full rationale
+in D-024.
+
+Every long-term write produces an `audit_log` row: `actor`, `action`, `target`,
+`timestamp`, `request_id`, `trace_id` (SECURITY §6).
 
 Writes are explicit only — the chatbot calls the `write_memory` tool. There are no auto-writes.
+
+- **Module:** `app/memory/long_term.py` — `write_entry`, `search`, `list_entries`.
+- **Test:** `tests/test_memory_recall.py` — graded cross-conversation recall test using real embeddings.
 
 ## 9. Startup and Refuse-to-Boot Checks
 
