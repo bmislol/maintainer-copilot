@@ -946,6 +946,71 @@ A domain-adapted cross-encoder (or in-domain training on this corpus) would be n
 
 ---
 
+## D-019: Query Transformation — HyDE Augment Pattern
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+Phase 3.3 requires a query transformation step to improve recall.  The two main candidates are:
+- **HyDE** (Hypothetical Document Embedding, Gao et al. 2022): generate a hypothetical answer, embed it, retrieve with that embedding.
+- **Multi-query expansion**: generate N paraphrased queries, retrieve with each, union results.
+
+### Decision
+
+**HyDE as an augment (three-stream RRF)**, not a replace.
+
+Rather than substituting the HyDE embedding for the original query embedding, we run three streams in parallel:
+- Stream A: `dense(original_query)`
+- Stream B: `dense(hyde_passage)`
+- Stream C: `BM25(original_query)`
+
+All three are fused with RRF (k=60).  Stream B adds recall on queries where semantic similarity to a hypothetical answer is stronger than similarity to the raw question.  Stream C retains exact-match strength.  Stream A is never discarded, preventing HyDE hallucinations from displacing correct results.
+
+The client provides the `AsyncAnthropic` instance (D-019 design rule): `query_transform.hyde_transform(query, client)` — the function does not construct the client internally, so Vault-keyed initialization is the caller's responsibility.
+
+Claude Haiku 4.5 (`claude-haiku-4-5`) is used for HyDE generation: short passages (≤256 tokens), fast, cheap.
+
+### Why HyDE over multi-query
+
+- Multi-query expands the retrieval pool geometrically — N queries × pool_k = N×50 dense calls.
+- HyDE adds exactly one LLM call and one embedding pass; overhead is bounded.
+- Proxy set too small (18 queries) to reliably measure multi-query gains; HyDE is the sounder choice on the time budget.
+
+### Benchmark note
+
+HyDE adds ~1–2 s latency (one Haiku API call) on the hot path.  Since this is a maintainer tool rather than a user-facing product, the tradeoff is acceptable.  A HyDE benchmark on the 18-query set is deferred to Phase 3.4 (25-triple golden set) where statistical significance is achievable.
+
+---
+
+## D-020: Metadata Filter Design
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+The corpus contains two source types: `doc` (scikit-learn RST documentation) and `issue` (GitHub issues).
+Maintainers often know which type is relevant: "show me only docs" or "only look at filed issues".
+
+### Decision
+
+`SourceFilterLiteral = Literal["docs", "issues", "all"]` exposed as a parameter on `RAGPipeline`.
+
+The filter maps to:
+- `"docs"` → `source_type = "doc"` in pgvector query + `bm25_indexes["docs"]`
+- `"issues"` → `source_type = "issue"` + `bm25_indexes["issues"]`
+- `"all"` → no WHERE clause + `bm25_indexes["all"]` (default)
+
+Three BM25 indexes are maintained separately (D-017 decision) so filtering doesn't require re-scanning the combined index.  This means the filter has zero overhead beyond the BM25 index selection.
+
+### Why Literal not a custom Enum
+
+A `Literal` type is simpler, maps directly to JSON request params, and avoids an import for callers.  The three values are stable and unlikely to expand (the corpus is fixed for this project).
+
+---
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -1191,8 +1256,8 @@ Filled in as phases land. Reserved slots:
 - **D-016 — Chunking strategy, pgvector schema, retrieval baseline.** ✅ Filled by Phase 3.2.
 - **D-017 — Hybrid retrieval weighting.** ✅ Filled by Phase 3.3.
 - **D-018 — Reranker choice.** ✅ Filled by Phase 3.3.
-- **D-019 — Query transformation technique.** Filled by Phase 3.3.
-- **D-020 — Metadata filter design.** Filled by Phase 3.3.
+- **D-019 — Query transformation technique.** ✅ Filled by Phase 3.3.
+- **D-020 — Metadata filter design.** ✅ Filled by Phase 3.3.
 - **D-021 — RAG eval thresholds and judge model.** Filled by Phase 3.4.
 - **D-022 — Redaction pattern list.** Filled by Phase 3.5 (cross-references SECURITY.md).
 - **D-023 — Short-term memory TTL and justification.** Filled by Phase 4.3.
