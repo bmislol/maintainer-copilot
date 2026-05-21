@@ -235,11 +235,11 @@ The artifact contract pattern (refuse-to-boot on SHA mismatch from D-009) applie
 | Embedding model | `sentence-transformers/all-MiniLM-L6-v2` — 384 dim, tied hit@5 with `BAAI/bge-base-en-v1.5` (88.89% on 18-query proxy set) at 7.5× lower encode latency. | Phase 3.1 (D-015) |
 | Chunking strategy | Structural: RST docs split at section headings; issues split body + per-comment. Sliding-window fallback at 220 tokens / 50-token overlap. 641 items → 9,701 chunks (docs=4,846, issues=4,855). | Phase 3.2 (D-016) |
 | Vector store | pgvector `rag_chunks` table — `vector(384)`, HNSW index (m=16, ef_construction=64), GIN on metadata JSONB. Baseline: hit@1=83.33%, hit@5=94.44% (18-query proxy set). | Phase 3.2 (D-016) |
-| Sparse retrieval | BM25 | Phase 3.3 |
-| Dense + sparse weighting | TBD (tuned on golden set) | Phase 3.3 (D-017) |
-| Reranker | Cross-encoder (TBD model) | Phase 3.3 (D-018) |
-| Query transformation | TBD (HyDE or multi-query) | Phase 3.3 (D-019) |
-| Metadata filtering | At least one filter (e.g. `is_resolved`, `version`) | Phase 3.3 (D-020) |
+| Sparse retrieval | BM25Okapi (rank_bm25), three in-memory indexes (docs/issues/all), built at startup in ~0.5 s / ~50 MB RAM. Degenerate chunks (n_tokens < 5) deleted before indexing. | Phase 3.3 (D-017) |
+| Dense + sparse weighting | RRF (k=60) — no tuned weights, rank-based fusion. Hybrid gains: hit@5 94.44% → 100.00% (+5.56 pp), MRR@10 0.8889 → 0.9074, recall@10 92.59% → 100.00% on 18-query proxy set. | Phase 3.3 (D-017) |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2`, inline singleton (not modelserver). **Not used by default** — domain mismatch with scikit-learn docs/issues causes regression (hit@1 83.33% → 44.44%). Available as `use_rerank=True` flag in RAGPipeline. | Phase 3.3 (D-018) |
+| Query transformation | HyDE augment (not replace): three-stream RRF — dense(query) + dense(hyde_passage) + BM25(query). Gains over hybrid: hit@1 83.33% → 88.89% (+5.56 pp), MRR@10 0.9074 → 0.9444. HyDE via `claude-haiku-4-5`, ≤256 tokens. `use_hyde=True` default. | Phase 3.3 (D-019) |
+| Metadata filtering | `SourceFilterLiteral["docs","issues","all"]` on `RAGPipeline`. Maps to pgvector WHERE clause + BM25 index selection. Zero-overhead filter since three BM25 indexes are pre-built. | Phase 3.3 (D-020) |
 
 ## 12. Tracing and Logging
 

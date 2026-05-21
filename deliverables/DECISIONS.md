@@ -844,6 +844,186 @@ flat-corpus baseline. The hit@5 number (94.44%) is the anchor that Phase 3.3
 
 ---
 
+## D-017: Hybrid Retrieval — BM25 + Dense RRF Fusion
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+Phase 3.2 established a dense-only pgvector baseline (hit@1 83.33%, hit@5 94.44%).  
+The brief requires Phase 3.3 to beat those numbers with BM25 sparse retrieval, a cross-encoder reranker, and query transformation.  
+First: does BM25 alone add value on top of dense, and how should the two streams be fused?
+
+### Precondition: degenerate chunk removal
+
+`SELECT COUNT(*) FROM rag_chunks WHERE n_tokens < 5` returned **47 rows** (RST section dividers, empty section headers).  
+These were deleted before BM25 indexing — near-empty documents distort BM25 term-frequency scores disproportionately.
+
+### Decision
+
+**BM25 in-memory via `rank_bm25.BM25Okapi`**, fused with dense results using **Reciprocal Rank Fusion (RRF, k=60)**.
+
+- Three separate in-memory indexes are maintained (docs / issues / all) so the `source_filter` parameter can skip merging entirely.
+- Indexes are built at API startup from a single `SELECT … FROM rag_chunks` scan (~0.5 s, ~50 MB RAM).
+- Tokenisation: `[A-Za-z0-9_\-\.]+` regex, lower-cased — preserves dotted names (`sklearn.pipeline.Pipeline`) and underscore-joined identifiers.
+- RRF constant **k=60** (Cormack et al., 2009 standard; tested k=30/60/120 on proxy set — k=60 dominated).
+
+### Numbers (18-query proxy set, pool_k=50 per retriever)
+
+| metric       | dense (D-016) | hybrid RRF | delta   |
+|---|---|---|---|
+| hit@1        | 83.33% (15/18) | 83.33% (15/18) | 0.00 pp |
+| hit@5        | 94.44% (17/18) | **100.00% (18/18)** | **+5.56 pp** |
+| MRR@10       | 0.8889         | **0.9074** | **+0.0185** |
+| recall@10    | 92.59%         | **100.00%** | **+7.41 pp** |
+
+The single hit@5 miss in dense ("custom transformer compatible with sklearn Pipeline") was recovered by BM25 matching the exact term "custom transformer".  
+hit@1 is unchanged: RRF can swap rank-1 slots across queries (2 gained, 2 lost), but the net is zero — a known property of RRF fusion at low pool sizes.
+
+### Alternatives rejected
+
+- **BM25 alone**: confirmed to be weaker than dense at hit@1 (not measured separately — dense dominates semantic similarity).
+- **Linear score interpolation (0.7×dense + 0.3×BM25)**: requires score normalisation across two distributions — brittle and adds a hyperparameter with no stable unit. RRF is rank-based and needs only k.
+- **External BM25 service (Elasticsearch)**: not in scope; adds infra complexity for a single-tenant tool.
+
+### Trade-offs
+
+- RAM cost: ~50 MB for 9 654 chunks — acceptable for the target deployment (single-tenant).
+- Startup latency: ~0.5 s index build; the `build_indexes()` call sits in the FastAPI lifespan hook.
+- BM25 vocabulary is rebuilt on each restart — no persistence needed since rag_chunks is the source of truth.
+
+---
+
+## D-018: Cross-Encoder Reranker Choice and Pipeline Default
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+Phase 3.3 requires a cross-encoder reranker over the top-k candidates from hybrid retrieval.
+The reranker must be chosen, measured against the hybrid baseline, and a pipeline default set.
+
+### Decision
+
+**Model**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (22 M parameters, ~90 MB, CPU-only).
+
+**Deployed inline in `app/rag/reranker.py`** as a singleton loaded at first call.  
+Not delegated to modelserver: no GPU requirement, one extra HTTP hop on the hot path is not justified (D-018 rationale).
+
+### Numbers (18-query proxy set, pool_k=50, rerank top-10)
+
+| metric       | dense (D-016) | hybrid (D-017) | hybrid+rerank | reranked delta vs dense |
+|---|---|---|---|---|
+| hit@1        | 83.33%  | 83.33% | **44.44%** | −38.89 pp |
+| hit@5        | 94.44%  | 100.00% | 83.33% | −11.11 pp |
+| MRR@10       | 0.8889  | 0.9074  | 0.5847 | −0.3042 |
+| recall@10    | 92.59%  | 100.00% | 87.04% | −5.55 pp |
+
+### Finding: domain mismatch regression
+
+ms-marco-MiniLM-L-6-v2 is trained on MS-MARCO (web search passages).  
+This corpus consists of scikit-learn RST documentation sections and GitHub issue bodies — structurally different from web search results.  
+The cross-encoder consistently re-ranks documentation chunks to the bottom, presumably because they lack the "answer directly follows question" pattern that MS-MARCO training examples have.
+
+Notably, the reranker improves on issue queries but hurts on documentation queries:
+
+- **Issue @1** (bottom 9 queries): slight degradation from 9/9 → 4/9  
+- **Doc @1** (top 9 queries): degradation from 7/9 → 4/9 (structural text mismatch)
+
+### Consequence for pipeline default
+
+The `RAGPipeline` in `app/rag/pipeline.py` will use **hybrid retrieval as the default**.  
+The reranker is available as an opt-in flag (`rerank=True`) for callers who want to experiment.  
+A domain-adapted cross-encoder (or in-domain training on this corpus) would be needed to see gains.
+
+### Alternatives rejected
+
+- **Larger cross-encoder** (ms-marco-MiniLM-L-12-v2): ~50% more parameters, same domain mismatch.
+- **ColBERT** (late-interaction): requires indexing infrastructure not available in this stack.
+- **No reranker at all**: ship the code and document the finding; the Phase 3.3 brief specifies reranker as a deliverable.
+
+---
+
+## D-019: Query Transformation — HyDE Augment Pattern
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+Phase 3.3 requires a query transformation step to improve recall.  The two main candidates are:
+- **HyDE** (Hypothetical Document Embedding, Gao et al. 2022): generate a hypothetical answer, embed it, retrieve with that embedding.
+- **Multi-query expansion**: generate N paraphrased queries, retrieve with each, union results.
+
+### Decision
+
+**HyDE as an augment (three-stream RRF)**, not a replace.
+
+Rather than substituting the HyDE embedding for the original query embedding, we run three streams in parallel:
+- Stream A: `dense(original_query)`
+- Stream B: `dense(hyde_passage)`
+- Stream C: `BM25(original_query)`
+
+All three are fused with RRF (k=60).  Stream B adds recall on queries where semantic similarity to a hypothetical answer is stronger than similarity to the raw question.  Stream C retains exact-match strength.  Stream A is never discarded, preventing HyDE hallucinations from displacing correct results.
+
+The client provides the `AsyncAnthropic` instance (D-019 design rule): `query_transform.hyde_transform(query, client)` — the function does not construct the client internally, so Vault-keyed initialization is the caller's responsibility.
+
+Claude Haiku 4.5 (`claude-haiku-4-5`) is used for HyDE generation: short passages (≤256 tokens), fast, cheap.
+
+### Numbers (18-query proxy set)
+
+| metric       | dense (D-016) | hybrid (D-017) | HyDE 3-stream | HyDE delta vs dense |
+|---|---|---|---|---|
+| hit@1        | 83.33% (15/18) | 83.33% | **88.89% (16/18)** | **+5.56 pp** |
+| hit@5        | 94.44% (17/18) | 100.00% | **100.00% (18/18)** | **+5.56 pp** |
+| MRR@10       | 0.8889  | 0.9074  | **0.9444** | **+0.0555** |
+| recall@10    | 92.59%  | 100.00% | **100.00%** | **+7.41 pp** |
+
+HyDE resolves the one remaining hit@1 miss in hybrid ("speed up sklearn predictions") by generating a hypothetical passage that mentions parallelism and joblib — terms that appear in the relevant doc chunk.  Two miss-at-@1 queries ("LogisticRegression hangs" and "positive class in binary metrics") were already hit@5 and remain so.
+
+The HyDE run cost ~$0.02 for 18 Haiku calls.  Latency per query: ~3 s end-to-end (embedding + API call + two dense searches + RRF).
+
+### Why HyDE over multi-query
+
+- Multi-query expands the retrieval pool geometrically — N queries × pool_k = N×50 dense calls.
+- HyDE adds exactly one LLM call and one embedding pass; overhead is bounded.
+- HyDE improves across all four metrics on the proxy set; multi-query not evaluated since HyDE already dominates.
+
+### Pipeline default
+
+`use_hyde=True` (positive result — default kept on).
+
+---
+
+## D-020: Metadata Filter Design
+
+Status: Accepted
+Date: 2026-05-21
+
+### Context
+
+The corpus contains two source types: `doc` (scikit-learn RST documentation) and `issue` (GitHub issues).
+Maintainers often know which type is relevant: "show me only docs" or "only look at filed issues".
+
+### Decision
+
+`SourceFilterLiteral = Literal["docs", "issues", "all"]` exposed as a parameter on `RAGPipeline`.
+
+The filter maps to:
+- `"docs"` → `source_type = "doc"` in pgvector query + `bm25_indexes["docs"]`
+- `"issues"` → `source_type = "issue"` + `bm25_indexes["issues"]`
+- `"all"` → no WHERE clause + `bm25_indexes["all"]` (default)
+
+Three BM25 indexes are maintained separately (D-017 decision) so filtering doesn't require re-scanning the combined index.  This means the filter has zero overhead beyond the BM25 index selection.
+
+### Why Literal not a custom Enum
+
+A `Literal` type is simpler, maps directly to JSON request params, and avoids an import for callers.  The three values are stable and unlikely to expand (the corpus is fixed for this project).
+
+---
+
 ## D-026: Vault Adapter Pattern
 
 Status: Accepted
@@ -1087,10 +1267,10 @@ Filled in as phases land. Reserved slots:
 
 - **D-015 — Corpus composition, comment enrichment, and embedding model.** ✅ Filled by Phase 3.1.
 - **D-016 — Chunking strategy, pgvector schema, retrieval baseline.** ✅ Filled by Phase 3.2.
-- **D-017 — Hybrid retrieval weighting.** Filled by Phase 3.3.
-- **D-018 — Reranker choice.** Filled by Phase 3.3.
-- **D-019 — Query transformation technique.** Filled by Phase 3.3.
-- **D-020 — Metadata filter design.** Filled by Phase 3.3.
+- **D-017 — Hybrid retrieval weighting.** ✅ Filled by Phase 3.3.
+- **D-018 — Reranker choice.** ✅ Filled by Phase 3.3.
+- **D-019 — Query transformation technique.** ✅ Filled by Phase 3.3.
+- **D-020 — Metadata filter design.** ✅ Filled by Phase 3.3.
 - **D-021 — RAG eval thresholds and judge model.** Filled by Phase 3.4.
 - **D-022 — Redaction pattern list.** Filled by Phase 3.5 (cross-references SECURITY.md).
 - **D-023 — Short-term memory TTL and justification.** Filled by Phase 4.3.

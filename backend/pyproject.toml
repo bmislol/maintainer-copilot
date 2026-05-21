@@ -15,7 +15,6 @@ dependencies = [
     "psycopg2-binary>=2.9.10",              # Sync driver — Alembic prefers this for migrations
     "pgvector>=0.3.6",                      # pgvector type bindings
     "langfuse>=2.50.0,<3.0.0",
-
     # ─── ML / training stack ──────────────────────────────────────
     "torch>=2.4.0",
     "transformers>=4.46.0",
@@ -24,17 +23,14 @@ dependencies = [
     "evaluate>=0.4.3",
     "scikit-learn>=1.5.0",
     "wandb>=0.18.0",
-
     # ─── Object storage client (for modelserver to fetch artifacts) ──
     "minio>=7.2.0",
-
     "anthropic>=0.40.0",
     "tenacity>=9.0.0",
-
     "pyyaml>=6.0.0",
-
     "sentence-transformers>=3.0.0",
     "GitPython>=3.1.40",
+    "rank-bm25>=0.2.2",
 ]
 
 [dependency-groups]
@@ -102,6 +98,14 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
   module = ["minio.*"]
+  ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+  module = ["psycopg2.*"]
+  ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+  module = ["rank_bm25"]
   ignore_missing_imports = true
 
 # ─── pytest ────────────────────────────────────────────────────────

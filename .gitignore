@@ -97,3 +97,5 @@ backend/data/rag_corpus/issues/
 
 # scikit-learn clone for docs extraction
 backend/data/scikit-learn-clone/
+
+form_message.md
