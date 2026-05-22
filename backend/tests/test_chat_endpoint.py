@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.db.models.users import User
 from app.db.session import get_async_session
-from app.infra.auth import current_active_user, get_jwt_strategy
+from app.infra.auth import get_current_user_or_widget, get_jwt_strategy
 from app.main import app
 
 _TEST_SECRET = "test-jwt-secret-for-chat-unit-tests-only"
@@ -58,7 +58,7 @@ async def _mock_session() -> AsyncGenerator[Any, None]:
 
 @pytest.fixture()
 def auth_override() -> None:
-    app.dependency_overrides[current_active_user] = lambda: _mock_user()
+    app.dependency_overrides[get_current_user_or_widget] = lambda: _mock_user()
 
 
 @pytest.mark.asyncio
@@ -82,13 +82,13 @@ async def test_send_message_streams_sse(auth_override: None) -> None:  # noqa: A
 
 @pytest.mark.asyncio
 async def test_send_message_requires_auth() -> None:
-    # No auth override → should return 401
+    # No Bearer token and no widget_id → get_current_user_or_widget raises 403
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/chat/send",
             json={"conversation_id": None, "message": "hi"},
         )
-    assert resp.status_code == 401
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

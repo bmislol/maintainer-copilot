@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright install chromium)",
+      "Bash(find /root /home -name \"chromium\" -type f 2>/dev/null | head -3; find /tmp/pw-browsers -name \"chromium\" -type f 2>/dev/null | head -3; echo \"done\")",
+      "Read(//root/**)",
+      "Read(//tmp/pw-browsers/**)",
+      "Bash(pip3 install *)",
+      "Bash(python3 -m playwright install chromium)",
+      "Bash(find ~/.cache/ms-playwright -name \"chromium\" -o -name \"chrome\" 2>/dev/null | head -3; echo \"---\"; ls ~/.cache/ms-playwright/ 2>/dev/null || echo \"not yet\")",
+      "Read(//home/bmislol/.cache/ms-playwright/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174)",
+      "Bash(python3 -)",
+      "Bash(python -m pytest -q)"
+    ]
+  }
+}
