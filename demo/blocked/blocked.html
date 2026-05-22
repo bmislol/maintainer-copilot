@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blocked Host — CSP Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 48px auto; padding: 0 24px; color: #1f2937; }
+    h1 { font-size: 2rem; margin-bottom: 0.25em; }
+    .warning { background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; padding: 16px 20px; margin: 24px 0; }
+    .warning strong { color: #dc2626; }
+    pre { background: #f3f4f6; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 0.85em; }
+    code { font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h1>Blocked Host — CSP Demo</h1>
+
+  <div class="warning">
+    <strong>This origin is NOT in allowed_origins.</strong><br>
+    The widget bubble below should NOT appear. Open DevTools → Console to
+    see the <code>Content-Security-Policy: frame-ancestors</code> violation.
+  </div>
+
+  <p>
+    This page is served from <code>http://localhost:8090</code>. The widget's
+    <code>widget.js</code> response carries:
+  </p>
+  <pre>Content-Security-Policy: frame-ancestors 'self' http://localhost:8080</pre>
+  <p>
+    Since <code>http://localhost:8090</code> is not in the <code>frame-ancestors</code>
+    list, the browser refuses to load the widget into this page's context and
+    logs a CSP violation in the console.
+  </p>
+  <p>
+    Compare with the <strong>allowed host</strong> at
+    <a href="http://localhost:8080" target="_blank">http://localhost:8080</a>
+    where the bubble appears.
+  </p>
+
+  <!--
+    This embed will be blocked by the browser's CSP enforcement.
+    The widget.js frame-ancestors directive does not include http://localhost:8090.
+  -->
+  <script
+    src="http://localhost:8000/loader.js"
+    data-widget-id="00000000-0000-0000-0001-000000000001"
+    data-api-base="http://localhost:8000">
+  </script>
+</body>
+</html>

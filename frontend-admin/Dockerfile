@@ -16,6 +16,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project
 
 COPY app.py ./
+COPY pages/ ./pages/
+COPY utils/ ./utils/
 
 ENV PATH="/app/.venv/bin:$PATH"
 

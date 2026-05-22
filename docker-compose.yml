@@ -183,7 +183,7 @@ services:
       context: ./frontend-admin
       dockerfile: Dockerfile
     environment:
-      API_BASE_URL: http://api:8000
+      API_URL: http://api:8000
     ports:
       - "${ADMIN_PORT:-8501}:8501"
     depends_on:
@@ -221,6 +221,21 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+
+  # Serves demo/blocked/blocked.html from http://localhost:8090.
+  # http://localhost:8090 is intentionally NOT in allowed_origins, so the
+  # browser blocks the widget embed with a frame-ancestors CSP violation.
+  blocked-host:
+    image: nginx:1.27-alpine
+    ports:
+      - "8090:80"
+    volumes:
+      - ./demo/blocked:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost/blocked.html > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   db-data:
