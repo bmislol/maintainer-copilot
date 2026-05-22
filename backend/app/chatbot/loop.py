@@ -82,7 +82,7 @@ async def run_stream(
 
         async with anthropic_client.messages.stream(
             model=MODEL,
-            max_tokens=1024,
+            max_tokens=2048,
             system=system_prompt,
             messages=messages,
             tools=tools_for_this_round,  # type: ignore[arg-type]
