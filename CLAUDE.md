@@ -25,7 +25,7 @@ It runs in two places that share one FastAPI backend:
 
 **Execution Rule**: Always act as a technical planner first. For complex tasks, propose a step-by-step implementation plan and wait for my approval before executing code changes. Once approved, write the code.
 
-**Status**: Sections 1 (foundations), 2 (DL track), and 3 (advanced RAG) are complete and merged to main. Section 4 in progress. Phases 4.1 (auth) and 4.2 (chatbot core) merged. Currently on Phase 4.3 (memory) — branch `feat/19-memory`, implementation complete, pending PR/merge.
+**Status**: Sections 1–4 complete and merged to main. Section 5 (Polish + Present) starting. All seven Section 4 phases (4.1 auth → 4.7 demo validation) merged. Both eval gates green: classification macro-F1 1.0000, RAG hit@5 0.9583.
 
 Before suggesting any work, read these files in order:
 1. `Checklist.md` — Read this to understand the granular step-by-step progress and exactly which checklist items have been completed so far. **You are responsible for maintaining this file. Update it whenever we start or finish a new phase.**

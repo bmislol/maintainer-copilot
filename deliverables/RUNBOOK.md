@@ -206,11 +206,11 @@ For local Anthropic-free runs (skip the gate test):
 uv run pytest        # default skips @pytest.mark.eval
 ```
 
-## 6. Demo Flow (Friday)
+## 6. Friday Demo Script
 
-### 6.1 Pre-demo setup (do before the presentation)
+### 6.1 Prerequisites (run before presenting — ~5 min)
 
-Run these four steps in order. Steps 2 and 3 are idempotent — safe to re-run.
+Steps 2 and 3 are idempotent: safe to re-run if unsure.
 
 **Step 1 — Start the stack:**
 
@@ -218,12 +218,13 @@ Run these four steps in order. Steps 2 and 3 are idempotent — safe to re-run.
 docker compose up -d
 ```
 
-Wait ~30 seconds for Langfuse to become ready. Verify:
+Wait ~30 seconds for Langfuse to initialise. Verify everything is up:
 
 ```bash
 docker compose ps
 curl -s http://localhost:8000/healthz        # {"status":"ok"}
 curl -s http://localhost:8080/               # HTML — Acme OSS Docs
+curl -s http://localhost:8090/blocked.html   # HTML — Blocked Host
 curl -s http://localhost:8501/_stcore/health # ok
 ```
 
@@ -238,18 +239,17 @@ cd backend
 uv run python -m app.entrypoints.bootstrap_admin
 ```
 
-Expected output: `Admin user created: admin@maintainer-copilot.dev`
+Expected: `Admin user created: admin@maintainer-copilot.dev`
 
 **Step 3 — Bootstrap the demo widget** (skip if already done):
 
 ```bash
 export DATABASE_URL="postgresql+asyncpg://copilot:copilot-dev-password@localhost:5432/copilot"
-
 cd backend
 uv run python -m scripts.bootstrap_widget
 ```
 
-Expected output:
+Expected:
 ```
 Demo widget created: 00000000-0000-0000-0001-000000000001
   name:            Demo Widget
@@ -257,90 +257,274 @@ Demo widget created: 00000000-0000-0000-0001-000000000001
   allowed_origins: ['http://localhost:8080']
 ```
 
-The demo widget UUID `00000000-0000-0000-0001-000000000001` is hardcoded in both the script and `demo/host/public/index.html` — no manual copy-paste required.
+The UUID `00000000-0000-0000-0001-000000000001` is hardcoded in both the script and `demo/host/public/index.html` — no manual copy-paste required.
 
-**Step 4 — Rebuild the demo host** (only needed after code changes):
+**Step 4 — Rebuild demo host** (only if code changed since last run):
 
 ```bash
 docker compose build host && docker compose up -d host
 ```
 
-Then open `http://localhost:8080` — the 🤖 bubble should appear in the bottom-right corner.
+Open `http://localhost:8080` — the 🤖 bubble should appear.
 
 ---
 
-### 6.2 10-minute walkthrough
+### 6.2 Demo flow (10 minutes)
 
-**1. Streamlit admin login**
-- Open `http://localhost:8501`
-- Log in: `admin@maintainer-copilot.dev` / `change-me-before-demo`
-- Show the sidebar: email display, Logout button, four nav pages
+---
 
-**2. Chat — tool-calling demo**
-- Navigate to **Chat** page
-- Send: _"Classify this issue: 'np.array crashes with float16 dtype on ARM'"_
-- Point out: classification (bug), NER extraction (function name, dtype), RAG context chunks cited
-- Show `Conversation: <uuid>` caption below the response
-- Open Langfuse (`http://localhost:3001`) — find the trace; walk through the tool call spans
+#### 1. Architecture overview (1 min)
 
-**3. Memory — cross-conversation recall**
-- In conversation A (current), send:
-  _"Remember: the CI gate requires macro_f1 ≥ 0.90 before any merge"_
-  (Claude calls `write_memory`)
-- Click **New Conversation** — session B starts
-- Send: _"What quality threshold must pass before code is merged?"_
-- Claude recalls the stored fact — point to the pgvector similarity match
-- Navigate to **Memory Inspector** — show the episodic entry with `created_at`
+_Open `docker-compose.yml` in the IDE._
 
-**4. Widget Config page**
-- Navigate to **Widget Configuration**
-- Show the form: name, theme, greeting, enabled_tools, allowed_origins
-- Show the embed snippet that appears after creation/update
-- Explain: `allowed_origins` drives both CORS and `frame-ancestors` CSP
+> "Eleven services. Secrets in Vault — nothing in `.env` except the Vault root token
+> and port assignments. Artifacts in MinIO. Traces in Langfuse. Logs redacted before
+> they leave the process."
 
-**5. Demo host — widget loads (ALLOWED origin)**
-- Open `http://localhost:8080` in a browser
-- The 🤖 bubble appears in the bottom-right corner
-- Click the bubble — panel opens with "Maintainer's Copilot" header and greeting
-- Type "hello" → real LLM response streams in
-- In browser DevTools → Network tab: show `loader.js` → `widget.js` → `/chat/send?widget_id=…`
-- In DevTools → Response headers for `widget.js`:
+Point to the startup order: vault → vault-init seeds secrets → db/redis/minio/langfuse
+→ migrate runs Alembic → api/modelserver/chatbot/widget/host start.
+
+---
+
+#### 2. Refuse-to-boot proof (30 sec)
+
+_Open `backend/app/core/lifespan.py` — show the startup checks._
+
+> "The API won't start unless Vault is reachable, Langfuse is reachable, and every
+> eval threshold in `eval_thresholds.yaml` is non-zero. If a PR zeroes out a threshold
+> the container exits with code 3 before serving a single request."
+
+---
+
+#### 3. Classification demo (1 min)
+
+_Open Swagger at `http://localhost:8000/docs` → `POST /classify`._
+
+Paste:
+```json
+{"text": "AdaBoost crashes with negative sample weights on sparse input"}
+```
+
+Expected response: `{"label": "bug", "confidence": ~0.57}`
+
+> "Three classifiers compared on the same 578-item test set: TF-IDF + LogisticRegression,
+> fine-tuned DistilBERT, and Claude Haiku. Haiku won on macro-F1. The modelserver
+> serves the DistilBERT proof — both are live. Decision in DECISIONS.md D-012."
+
+---
+
+#### 4. Streamlit admin — chat + tool-calling (2 min)
+
+_Open `http://localhost:8501`. Log in: `admin@maintainer-copilot.dev` / `change-me-before-demo`._
+
+Send:
+> _"Classify this issue: 'np.array crashes with float16 dtype on ARM processors'"_
+
+Point out:
+- Classification result (bug), NER entities extracted (function name, dtype, platform)
+- RAG context chunks cited in the answer
+- `Conversation: <uuid>` caption below — that UUID traces directly to Langfuse
+
+_Switch to Langfuse at `http://localhost:3001`. Find the trace. Walk through spans:_
+- `chatbot_turn` span wrapping the full turn
+- `tool_use` → `classify_issue` → modelserver call
+- `tool_use` → `extract_entities` → modelserver call
+- `tool_use` → `retrieve_docs` → pgvector query
+
+---
+
+#### 5. Memory — write and recall pipeline (1 min)
+
+_Back in Streamlit Chat._
+
+Send:
+> _"Please remember: the CI gate requires macro_f1 ≥ 0.90 before any merge."_
+
+Claude calls `write_memory`. Show the acknowledgement in the response.
+
+_Click **New Conversation** (session B)._
+
+Send:
+> _"What quality threshold must pass before code is merged?"_
+
+Claude should not recall this in-chat (no `search_memory` tool yet — deferred to
+Phase 5). Instead, navigate to **Memory Inspector** — show the episodic entry written
+in session A with its `created_at` timestamp. Then demonstrate the underlying pipeline:
+
+```bash
+# From backend/
+DATABASE_URL="postgresql+asyncpg://copilot:copilot-dev-password@localhost:5432/copilot" \
+uv run python -m scripts.demo_memory_recall
+```
+
+Expected output (measured 2026-05-23):
+```
+[Step 1] Conversation A  (id=158b13db…)
+  → Sending: 'Please remember this for me: My name is Alex…'
+  ← Claude replied: "Got it, Alex! I've saved that you prefer detailed explanations…"
+  ✅ write_memory tool was called
+
+[Step 2] Conversation B  (id=fd41461e…)
+  → Querying pgvector: "What do I know about this user's background…"
+  ← 2 entry/entries recalled from long-term memory:
+     1. 'User name: Alex. Preference: Provide detailed explanations when debugging.'
+     2. "User's name is Alex and prefers detailed explanations when debugging issues."
+✅ PASS — written fact recalled via semantic similarity
+```
+
+> "Write is explicit-only — Claude only calls `write_memory` when asked. Every write
+> produces an `audit_log` row with actor, action, target, request_id, trace_id.
+> Retrieval is pgvector cosine similarity over all-MiniLM-L6-v2 embeddings (384-dim).
+> In-chat recall would be wired in Phase 5 via a `search_memory` tool."
+
+---
+
+#### 6. Widget Config + embed snippet (30 sec)
+
+_Navigate to **Widget Configuration** in Streamlit._
+
+> "Admin-only page. Name, theme, greeting, tools list, allowed origins. On save the
+> API refreshes `app.state.allowed_origins` in-process — no restart needed to activate
+> a new origin. The embed snippet is generated here and pasted into any host page."
+
+Show the snippet:
+```html
+<script
+  src="http://localhost:8000/loader.js"
+  data-widget-id="00000000-0000-0000-0001-000000000001"
+  data-api-base="http://localhost:8000">
+</script>
+```
+
+---
+
+#### 7. Widget — allowed origin (1 min)
+
+_Open `http://localhost:8080` in a browser._
+
+- The 🤖 bubble appears in the bottom-right corner (Shadow DOM — CSS isolated)
+- Click the bubble → dark panel opens, greeting streams in
+- Type "hello" → LLM response streams via SSE over POST
+
+_Open DevTools → Network tab._
+- `loader.js` → 200
+- `widget.js` → 200 — show the `content-security-policy` response header:
   ```
-  content-security-policy: frame-ancestors 'self' http://localhost:8080
+  frame-ancestors 'self' http://localhost:8080
   ```
+- `/chat/send?widget_id=…` → 200 (streaming)
 
-**6. Blocked origin demo (CSP violation)**
-- Open `http://localhost:8081` (the widget nginx container — NOT in allowed_origins)
-- Open DevTools → Console
-- Show the CSP violation:
+> "The widget is 10.16 KB gzipped. Preact instead of React — 93% bundle reduction.
+> Shadow DOM for CSS isolation. SSE over POST via `fetch` + `ReadableStream` because
+> `EventSource` is GET-only."
+
+---
+
+#### 8. Widget — blocked origin CSP violation (1 min)
+
+_Open `http://localhost:8090/blocked.html` in a NEW tab._
+
+- The 🤖 bubble does NOT appear
+- Open DevTools → Console:
   ```
   Refused to frame 'http://localhost:8000' because an ancestor violates
-  the following Content Security Policy directive: "frame-ancestors 'self'
-  http://localhost:8080".
+  the following Content Security Policy directive:
+  "frame-ancestors 'self' http://localhost:8080"
   ```
-- The bubble does NOT appear — the embed is blocked at the browser level
 
-**7. CI green + eval gates**
-- Show GitHub Actions for the `main` branch — all checks green
-- Open `backend/eval_thresholds.yaml` — point to `classification.macro_f1: 0.90` and `rag.hit_at_5: 0.8583`
-- These are hard gates: if a PR makes the model worse, CI fails before merge
-
-**8. Redaction demo**
-- Run: `docker compose exec api pytest tests/test_redaction.py -v`
-- Show all assertions pass — API keys, emails, tokens are `[REDACTED]` in logs and traces
+> "The block is enforced at the browser level by the `frame-ancestors` directive on
+> `widget.js`. `http://localhost:8090` is not in `allowed_origins` so the header
+> excludes it. The allowed_origins set lives in the `widgets` DB row — not in an
+> env variable — so a new origin activates immediately after a widget update with
+> no restart."
 
 ---
 
-### 6.3 Expected URLs at demo time
+#### 9. Eval gates (1 min)
 
-| Service | URL |
-|---|---|
-| API | http://localhost:8000 |
-| Streamlit admin | http://localhost:8501 |
-| Demo host (allowed) | http://localhost:8080 |
-| Widget nginx (blocked) | http://localhost:8081 |
-| Langfuse traces | http://localhost:3001 |
-| MinIO console | http://localhost:9001 |
+_Open `backend/eval_thresholds.yaml`._
+
+```yaml
+classification:
+  macro_f1: 0.90
+  per_class_min_f1: 0.50
+rag:
+  hit_at_5: 0.8583
+  reciprocal_rank: 0.7532
+```
+
+> "These are hard gates committed to the repo. CI runs the classification gate on
+> every path-relevant PR. If a code change makes the model worse, CI fails before
+> merge."
+
+Last measured results (run 2026-05-23):
+
+| Gate | Metric | Measured | Threshold | Status |
+|---|---|---|---|---|
+| Classification | macro-F1 | **1.0000** | 0.90 | ✓ |
+| Classification | per-class min | **1.0000** | 0.50 | ✓ |
+| RAG | hit@5 | **0.9583** (23/24) | 0.8583 | ✓ |
+| RAG | MRR@10 | **0.8139** | 0.7532 | ✓ |
+
+---
+
+#### 10. Redaction proof (30 sec)
+
+```bash
+docker compose exec api uv run pytest tests/test_redaction.py -v
+```
+
+Expected: 8 passed.
+
+> "A `RedactionFilter` is attached to the root log handler. It runs before the
+> `JSONFormatter` so every log line — regardless of which logger emitted it — is
+> redacted before it leaves the process. The mandatory grading criterion:
+> `sk-test-FAKE-not-real` never appears unredacted in any output."
+
+---
+
+### 6.3 Fallback talking points if the live demo breaks
+
+**Widget doesn't load (bubble doesn't appear):**
+> "The widget is served from localhost:8000 via a dedicated route with
+> `frame-ancestors` CSP headers. Let me show the curl output instead."
+
+```bash
+curl -s -I http://localhost:8000/widget.js
+# Expected: HTTP/1.1 200 OK + content-security-policy: frame-ancestors 'self' http://localhost:8080
+```
+
+**Chat doesn't stream (typing indicator spins indefinitely):**
+> "The SSE endpoint streams via POST + `fetch` + `ReadableStream`, not `EventSource` —
+> that's intentional because `EventSource` is GET-only. Let me show the Swagger demo
+> instead."
+Navigate to `http://localhost:8000/docs` → `POST /classify` to show a live API response.
+
+**Blocked host doesn't show a CSP error in the console:**
+> "The enforcement is server-side via the `frame-ancestors` header. Let me show the
+> CORS preflight block for an unknown origin directly."
+
+```bash
+curl -v -X OPTIONS http://localhost:8000/chat/send \
+  -H "Origin: http://evil.com" \
+  -H "Access-Control-Request-Method: POST" 2>&1 | grep -E "< HTTP|access-control"
+# Expected: 204 with NO access-control-allow-origin header (passive block — origin not in allowlist)
+```
+
+---
+
+### 6.4 URL reference
+
+| Service | URL | Notes |
+|---|---|---|
+| API + Swagger | http://localhost:8000/docs | |
+| Streamlit admin | http://localhost:8501 | login: admin@maintainer-copilot.dev / change-me-before-demo |
+| Demo host (allowed) | http://localhost:8080 | widget loads, chat works |
+| Blocked host (CSP demo) | http://localhost:8090/blocked.html | widget blocked, console CSP error |
+| Widget bundle | http://localhost:8081 | raw nginx serving widget.js |
+| Langfuse traces | http://localhost:3001 | |
+| MinIO console | http://localhost:9001 | |
+| Vault UI | http://localhost:8200 | |
 
 ## 7. Common Issues
 
