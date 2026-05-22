@@ -56,3 +56,57 @@ def get_memory_entries(token: str) -> list[dict]:  # type: ignore[type-arg]
     )
     resp.raise_for_status()
     return list(resp.json())
+
+
+def create_widget(
+    token: str,
+    *,
+    name: str,
+    theme: str,
+    greeting: str,
+    enabled_tools: list[str],
+    allowed_origins: list[str],
+) -> dict:  # type: ignore[type-arg]
+    """POST /widgets/ — creates a widget, returns the full widget dict."""
+    resp = requests.post(
+        f"{API_URL}/widgets/",
+        json={
+            "name": name,
+            "theme": theme,
+            "greeting": greeting,
+            "enabled_tools": enabled_tools,
+            "allowed_origins": allowed_origins,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return dict(resp.json())
+
+
+def update_widget(
+    token: str,
+    widget_id: str,
+    *,
+    patch: dict,  # type: ignore[type-arg]
+) -> dict:  # type: ignore[type-arg]
+    """PATCH /widgets/{id} — updates a widget, returns the updated widget dict."""
+    resp = requests.patch(
+        f"{API_URL}/widgets/{widget_id}",
+        json=patch,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return dict(resp.json())
+
+
+def get_my_widgets(token: str) -> list[dict]:  # type: ignore[type-arg]
+    """GET /widgets/mine — returns all widgets owned by the calling user."""
+    resp = requests.get(
+        f"{API_URL}/widgets/mine",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return list(resp.json())

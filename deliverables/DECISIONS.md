@@ -1578,6 +1578,234 @@ benefit at our scale.
 
 ---
 
+---
+
+## D-025: React widget — bundle format, framework choice, Shadow DOM, streaming approach, auth, and iframe security
+
+Status: Accepted
+Date: 2026-05-22
+
+### Context
+
+Phase 4.5 requires a self-contained JavaScript widget that any host page can
+embed via a single `<script>` tag. Key constraints from the brief:
+
+- Bundle size graded explicitly (gzipped, measured and recorded).
+- Must work inside an iframe (Phase 4.6 demo host) without host CSS leakage.
+- Streams assistant replies in real time (SSE from `/chat/send`).
+- Identified by a `widget_id` (UUID) instead of a user JWT.
+- Content-Security-Policy `frame-ancestors` enforcement graded in Phase 4.7.
+
+### Decision
+
+**Build format: iife (Immediately Invoked Function Expression).**
+Vite library mode with `formats: ['iife']` and `inlineDynamicImports: true`
+produces a single self-contained file. An iife executes on `<script>` load with
+no module system required — it works on any host page without the host needing
+to configure ES module support or a bundler. A UMD or ESM bundle would require
+the host to handle imports, which contradicts the "single `<script>` tag"
+requirement.
+
+**Framework: Preact instead of React.**
+React + ReactDOM gzipped: ~144 KB. Preact gzipped: ~3 KB. With Preact the full
+bundle (Preact + widget UI code) gzips to **10.16 KB** — a 93% reduction. Preact
+implements the same component model and hooks API as React; the alias shim
+(`react` → `preact/compat`) in `vite.config.js` makes existing React-style code
+work unchanged. The brief grades the bundle size number; 10 KB vs 144 KB is
+material.
+
+Measured sizes (production build, Vite 5.4):
+
+| Variant | Raw | Gzipped |
+|---|---|---|
+| React + ReactDOM | ~380 KB | ~144 KB |
+| Preact (`preact/compat`) | 25.14 KB | **10.16 KB** |
+
+**Shadow DOM isolation.**
+The widget mounts into a `div` with `.attachShadow({mode: 'open'})`. This
+prevents host-page CSS from leaking into the widget and widget CSS from leaking
+into the host. All styles are injected as a `<style>` element inside the shadow
+root (via `?inline` CSS import → string → rendered in JSX). No global class
+names, no `!important` battles, no risk of host themes breaking the chat panel.
+
+**SSE streaming: fetch + ReadableStream, not EventSource.**
+The `/chat/send` endpoint requires a POST request (body contains the message
+text). The browser's native `EventSource` API only supports GET. Using
+`fetch()` with `response.body.getReader()` and a `TextDecoder({stream: true})`
+gives the same line-by-line `data:` parsing over a POST body. This approach is
+correct for SSE-over-POST; `EventSource` would force a GET with query-string
+encoding, breaking the existing endpoint contract.
+
+**Widget auth: `widget_id` query parameter (UUID).**
+The widget is embedded on public or semi-public pages where the visitor is not
+logged in as a maintainer. A new `get_current_user_or_widget` dependency on
+`/chat/send` tries Bearer JWT first; if absent, it validates the `widget_id`
+query param (UUID format check) and returns a hardcoded system user
+(`00000000-0000-0000-0000-000000000001`). This keeps the chat endpoint
+unchanged for authenticated Streamlit clients while enabling the widget flow.
+Phase 4.6 replaces the UUID-only stub with a database lookup against the
+`widgets` table.
+
+**Content-Security-Policy `frame-ancestors`: deferred to Phase 4.6.**
+The brief grades CORS allowlist enforcement and `frame-ancestors` header
+enforcement together, and both require the `allowed_origins` column in the
+`widgets` database table (Phase 4.6). Implementing `frame-ancestors` here
+without the database column would require hardcoding origins — which Phase 4.6
+will replace anyway. The two mechanisms are implemented together in Phase 4.6
+where the `widgets` table is defined and the admin UI generates embed snippets.
+
+### Alternatives Considered
+
+- **React + ReactDOM:** 144 KB gzipped, exceeds a reasonable widget budget.
+- **Vanilla JS (no framework):** Would work but adds significant maintenance
+  cost for stateful chat UI (message list, streaming updates, open/close
+  toggle). Preact at 3 KB adds negligible size while providing a proper
+  component model.
+- **Web Components (custom elements):** Technically correct but requires more
+  boilerplate and less familiar testing story (no `@testing-library/*`
+  equivalent).
+- **EventSource for SSE:** Doesn't support POST; would require changing the
+  endpoint contract or URL-encoding message text.
+
+### Trade-offs
+
+- Preact's `preact/compat` layer covers ~95% of the React API. If a future
+  dependency requires React-specific internals not covered by compat, a
+  migration would be needed. At Phase 4.5 scope (no third-party component
+  libraries), this risk is zero.
+- Shadow DOM `mode: 'open'` means the host page JavaScript can access the
+  shadow root via `element.shadowRoot`. `mode: 'closed'` would prevent this
+  but also breaks Playwright testing (can't traverse closed shadow roots from
+  the outside). `open` is the standard choice for embeddable widgets.
+- The `widget_id` UUID stub (Phase 4.5) returns a system user for any valid
+  UUID. Full per-widget authentication and origin enforcement land in Phase 4.6.
+
+---
+
+---
+
+## D-026: Dynamic CORS middleware — DB-driven allowlist, not env var
+
+Status: Accepted
+Date: 2026-05-22
+
+### Context
+
+The api needs CORS headers so the embedded widget (served from a host page
+like `http://localhost:8080`) can POST to `/chat/send` and GET
+`/widgets/{id}/config`. The brief and SECURITY.md §8 require the allowlist to
+come from the database (`widgets.allowed_origins`), not from an environment
+variable. Different widgets can have different allowed origins; hardcoding a
+single env var would prevent multi-tenant operation.
+
+Additionally, the chat endpoint serves Server-Sent Events (SSE) for streaming.
+Starlette's built-in `CORSMiddleware` and `BaseHTTPMiddleware` both wrap the
+response body, which buffers SSE streams before flushing headers — breaking
+real-time streaming.
+
+### Decision
+
+**Pure ASGI middleware** (`DynamicCORSMiddleware` in `app/api/cors.py`).
+
+The middleware is a plain ASGI callable (not a subclass of `BaseHTTPMiddleware`).
+It reads `allowed_origins` from `scope["app"].state.allowed_origins` at
+**request time** — not at startup — so it always reflects the live set.
+
+For OPTIONS preflight: the middleware short-circuits before calling the
+application, returning 204 with full CORS headers for allowed origins and 204
+with NO CORS headers for blocked origins. The browser sees no
+`Access-Control-Allow-Origin` on blocked responses and rejects the subsequent
+request — this is the standard passive block pattern, not a 403.
+
+For non-preflight: the middleware wraps `send` with `send_with_cors`, which
+intercepts only the `http.response.start` message and injects CORS headers.
+`http.response.body` frames pass through unmodified, so SSE streaming is
+completely unaffected.
+
+**`app.state.allowed_origins` is loaded at startup** (lifespan) and
+**refreshed after each `POST /widgets/` and `PATCH /widgets/{id}`** call by
+calling `load_allowed_origins(session)` and writing back to `app.state`. This
+means new origins take effect immediately without a restart — the `Request`
+object passed to handlers gives access to `request.app.state`.
+
+### Alternatives Considered
+
+- **Starlette `CORSMiddleware` with env var:** Doesn't support per-widget
+  origin lists; buffers SSE; can't be hot-updated without restart.
+- **`BaseHTTPMiddleware`:** Easier to write but known to buffer async response
+  bodies in older Starlette versions. Sufficient for simpler endpoints but
+  unsafe for SSE without deeper investigation.
+- **Route-level CORS dependency:** Would require adding the check to every
+  route individually, with no central enforcement.
+
+### Trade-offs
+
+`scope["app"]` is set by Starlette's Router and is available for all routed
+requests. In unit tests that bypass the Router (direct ASGI calls), it may be
+`None`; the `getattr` fallback to `set()` is the safe default (no CORS headers
+= browser blocks, which is correct behaviour for an unknown origin).
+
+---
+
+## D-027: Content-Security-Policy frame-ancestors on widget.js route
+
+Status: Accepted
+Date: 2026-05-22
+
+### Context
+
+The instructor asked about iframe security (`frame-ancestors` / `X-Frame-Options`).
+CORS (`Access-Control-Allow-Origin`) controls fetch/XHR access from a page.
+`frame-ancestors` controls which pages may embed a resource inside an `<iframe>`.
+Without `frame-ancestors`, any page on the internet could embed the widget
+bundle in an iframe — including malicious pages that clickjack or steal
+conversation data.
+
+`StaticFiles` (FastAPI's built-in static file server) does not support custom
+response headers. Adding the CSP header requires intercepting the response.
+
+### Decision
+
+Replace the `StaticFiles` route for `/static/widget.js` with a **dedicated
+FastAPI endpoint** (`GET /static/widget.js` registered in `main.py` BEFORE the
+`StaticFiles` mount). The endpoint:
+
+1. Reads `widget.js` from disk via `Path.read_bytes()`.
+2. Reads `app.state.allowed_origins` from the request.
+3. Constructs `frame-ancestors 'self' <space-separated sorted origins>`.
+4. Returns a `Response` with `Content-Security-Policy` header set.
+
+**Observed behaviour:**
+- Before any widget is created: `frame-ancestors 'self'` (no extra origins).
+- After creating a widget with `allowed_origins: ["http://localhost:8080"]`:
+  `frame-ancestors 'self' http://localhost:8080` — live-updated, no restart.
+
+FastAPI routes take priority over mounts, so `GET /static/widget.js` is
+handled by the dedicated endpoint; all other `/static/*` paths continue to be
+served by `StaticFiles`.
+
+### Why not `X-Frame-Options`?
+
+`X-Frame-Options: ALLOW-FROM <origin>` is deprecated and only supports a single
+origin. `Content-Security-Policy: frame-ancestors` supports multiple origins,
+is widely supported in modern browsers, and is the OWASP-recommended approach.
+
+### Alternatives Considered
+
+- **Middleware that injects header for `/static/widget.js` path:** Works but
+  less explicit and harder to test than a dedicated route.
+- **nginx `add_header`:** Would work in the widget nginx container but
+  doesn't read from the database, requiring a config reload per change.
+
+### Trade-offs
+
+The widget.js file is read from disk on every request. At ~25 KB this is
+negligible I/O; a production deployment would add a `Cache-Control` header
+and potentially serve from a CDN. For demo purposes, per-request disk reads
+are acceptable.
+
+---
+
 ## Pending Decisions
 
 Filled in as phases land. Reserved slots:
@@ -1594,4 +1822,6 @@ Filled in as phases land. Reserved slots:
 - **D-034 — Tool-calling loop design.** ✅ Filled by Phase 4.2.
 - **D-023 — Short-term memory TTL and justification.** ✅ Filled by Phase 4.3.
 - **D-024 — Long-term memory type (episodic / semantic / procedural) and defense.** ✅ Filled by Phase 4.3.
-- **D-025 — Widget bundle target size and any trade-offs accepted to hit it.** Filled by Phase 4.5.
+- **D-025 — Widget bundle target size and any trade-offs accepted to hit it.** ✅ Filled by Phase 4.5.
+- **D-026 — Dynamic CORS middleware design (DB-driven, SSE-safe).** ✅ Filled by Phase 4.6.
+- **D-027 — frame-ancestors CSP header on widget.js.** ✅ Filled by Phase 4.6.

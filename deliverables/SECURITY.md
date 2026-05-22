@@ -158,21 +158,39 @@ The mandatory grading criterion — `sk-test-FAKE-not-real` must never appear un
 
 ## 8. CORS and CSP for the Widget
 
-The widget is the only public-facing surface that runs in a host's browser. Two layers protect it.
+The widget is the only public-facing surface that runs in a host's browser. Three layers protect it.
 
-### 8.1 CORS Allowlist
+### 8.1 CORS Allowlist (D-026)
 
-CORS is enforced from the widget's `allowed_origins` field in the `widgets` table, not from a hardcoded environment variable. When the widget bundle calls `/widgets/{wid}/config` and `/chat/send`, the API reads the widget row, compares the request `Origin` header against `allowed_origins`, and rejects with 403 if it does not match.
+CORS is enforced from the **union of all `allowed_origins` across every widget row**, not from a hardcoded environment variable. The `DynamicCORSMiddleware` (pure ASGI, `app/api/cors.py`) reads `app.state.allowed_origins` at every request:
 
-### 8.2 Frame-Ancestors CSP
+- **Non-preflight:** If the request `Origin` is in the set, `Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials` are added to the response. Otherwise no CORS headers are added (browser rejects the actual request).
+- **OPTIONS preflight:** Allowed origins receive a 204 with full CORS headers. Blocked origins receive a 204 with no CORS headers (standard passive block — no 403 that would reveal which origins are known).
+- **Live updates:** `app.state.allowed_origins` is loaded from DB at startup and refreshed after every `POST /widgets/` and `PATCH /widgets/{id}` call. No restart required to activate new origins.
 
-The route that serves the widget bundle (and the loader at `/widget.js`) sets:
+The `/widgets/{id}/config` endpoint is intentionally public (no auth). It returns only `{id, theme, greeting, enabled_tools}` — the `allowed_origins` field is **never exposed in the JSON response** and is server-side only.
+
+### 8.2 Frame-Ancestors CSP (D-027)
+
+`GET /static/widget.js` is a dedicated FastAPI endpoint (not a `StaticFiles` mount) that sets:
 
 ```text
-Content-Security-Policy: frame-ancestors <space-separated allowed origins from the widget row>
+Content-Security-Policy: frame-ancestors 'self' <space-separated sorted allowed_origins>
 ```
 
-A host whose origin is not in the allowlist cannot iframe the widget — the browser blocks the embed at load time with a console error. This is the second layer on top of CORS.
+Example after creating a widget with `allowed_origins: ["http://localhost:8080"]`:
+
+```text
+Content-Security-Policy: frame-ancestors 'self' http://localhost:8080
+```
+
+A host whose origin is not in the allowlist **cannot embed the widget in an iframe** — the browser blocks the embed at load time with a CSP violation in the console. This is the OWASP-recommended mechanism; `X-Frame-Options: ALLOW-FROM` is deprecated and supports only a single origin.
+
+Like CORS, this header reflects the live database state (refreshed on widget create/update).
+
+### 8.3 Widget Auth (get_widget_user)
+
+Embedded widget sessions use `?widget_id=<UUID>` instead of a Bearer JWT. The `get_widget_user` dependency (Phase 4.6) looks up the widget in the `widgets` table, validates it has an active owner, and returns that owner as the acting user. A `widget_id` that doesn't exist in the database returns 403. This prevents arbitrary UUID guessing from gaining chat access.
 
 ## 9. Refuse-to-Boot Security Checks
 

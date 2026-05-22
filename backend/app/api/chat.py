@@ -20,7 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.db.models.users import User
 from app.db.session import get_async_session
-from app.infra.auth import current_active_user
+from app.infra.auth import get_current_user_or_widget
 from app.services.chat_service import stream_chat_response
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class ChatRequest(BaseModel):
 async def send_message(
     body: ChatRequest,
     request: Request,
-    user: User = Depends(current_active_user),
+    user: User = Depends(get_current_user_or_widget),
     session: Any = Depends(get_async_session),
 ) -> EventSourceResponse:
     """Stream a chatbot response as SSE events.

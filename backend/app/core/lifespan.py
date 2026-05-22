@@ -126,6 +126,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, build_indexes, psycopg2_url)
 
+    # Load allowed_origins from the widgets table for the dynamic CORS middleware
+    # and frame-ancestors CSP header.  Stored in app.state so handlers can refresh
+    # it after POST/PATCH /widgets/ without a restart (D-026).
+    from app.repositories.widgets import load_allowed_origins
+
+    async with app.state.db_session_factory() as _session:
+        app.state.allowed_origins = await load_allowed_origins(_session)
+    logger.info("allowed_origins loaded at startup: %d origin(s)", len(app.state.allowed_origins))
+
     logger.info("api startup complete")
 
     yield
