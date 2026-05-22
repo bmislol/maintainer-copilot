@@ -337,11 +337,48 @@ long-term memory entries newest-first. Implemented in `app/api/memory.py`.
 
 ### 13.2 React Widget (`frontend-widget/`)
 
-The production-shaped, embeddable surface. Built with Vite, output to a single bundled JS file. Served either by the `widget` service or from MinIO with proper cache headers.
+The production-shaped, embeddable surface. Built with Vite in **iife** library mode, output as a single self-contained JS file (`backend/app/static/widget.js`). Served from FastAPI's `/static` mount. Served via `StaticFiles` in development; Phase 4.6 wires the loader script.
 
-The widget reads its config at load time from `/widgets/{wid}/config` and styles itself accordingly (theme, primary color, position, greeting, enabled tools).
+**Bundle format — iife:** Executes on `<script>` load with no module system required on the host. `inlineDynamicImports: true` ensures no code-splitting so a single file is fetched. (See D-025.)
 
-A `postMessage` channel exists between the widget and its host page, at minimum for iframe resize signals.
+**Framework — Preact (not React):** Preact implements the same hooks API as React but is ~3 KB vs ~144 KB for React + ReactDOM. Full bundle gzips to **10.16 KB** — within the brief's graded size target. The `react` → `preact/compat` alias in `vite.config.js` makes React-style JSX work unchanged. (See D-025.)
+
+**Shadow DOM isolation:** The widget creates a host `<div>` and calls `.attachShadow({mode: 'open'})`. All widget HTML and styles live inside the shadow root, preventing host-page CSS from leaking in and widget CSS from leaking out. Styles are injected via a `<style>` element inside the shadow (CSS loaded as `?inline` string). (See D-025.)
+
+**SSE streaming:** Uses `fetch()` + `response.body.getReader()` + `TextDecoder({stream: true})` instead of `EventSource`. The `/chat/send` endpoint requires POST; `EventSource` is GET-only. Line-by-line `data:` parsing is identical to the EventSource protocol. (See D-025.)
+
+**Auth:** Widget passes `?widget_id=<uuid>` as a query parameter. The `get_current_user_or_widget` FastAPI dependency tries Bearer JWT first, then falls back to `widget_id`. Phase 4.5 stub validates UUID format only; Phase 4.6 performs a database lookup.
+
+**Config fallback:** At load time the widget fetches `/widgets/{wid}/config`. If the fetch fails (CORS block in dev, unreachable API), it falls back to `DEFAULT_CONFIG` (`theme: dark`, `greeting: "Hello! How can I help?"`, `enabled_tools: ["retrieve_docs"]`).
+
+**CSP `frame-ancestors`:** Deferred to Phase 4.6. The `allowed_origins` database column and the `frame-ancestors` header are implemented together so origin enforcement is database-driven, not hardcoded. (See D-025.)
+
+**Running the dev harness:**
+```bash
+cd frontend-widget
+npm install
+npm run dev   # http://localhost:5174
+```
+`index.html` sets `window.__WIDGET_DEV_CONFIG__` before loading `main.jsx` as an ES module, because `document.currentScript` is `null` inside ES modules.
+
+**Tests:** 8 vitest tests covering `Widget.jsx` render/open/close and `useSSEChat` streaming + error handling.
+
+**File layout:**
+```
+frontend-widget/
+  src/
+    main.jsx          # IIFE entry — reads data-widget-id or __WIDGET_DEV_CONFIG__
+    Widget.jsx        # Root component — bubble toggle, shadow DOM, config fetch
+    ChatPanel.jsx     # Panel, message list, input row
+    useSSEChat.js     # fetch+ReadableStream SSE hook
+    api.js            # fetchConfig, createChatStream, DEFAULT_CONFIG
+    styles.css        # All widget styles (injected into shadow root)
+    __tests__/        # vitest + @testing-library/preact
+  index.html          # Dev harness
+  vite.config.js      # iife library mode, Preact alias, jsdom test env
+```
+
+The widget reads its config at load time from `/widgets/{wid}/config` and styles itself accordingly (theme, greeting, enabled tools).
 
 ### 13.3 Embed Flow and Origin Allowlisting
 

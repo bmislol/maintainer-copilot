@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Widget Dev Harness</title>
+  <style>
+    body { font-family: sans-serif; padding: 24px; background: #f3f4f6; }
+    h1 { margin-bottom: 8px; }
+    p { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>Widget Dev Harness</h1>
+  <p>The chat bubble should appear in the bottom-right corner.</p>
+
+  <!--
+    Vite dev mode loads main.jsx as an ES module where document.currentScript
+    is null. Pre-set config here so main.jsx can read it as a fallback.
+  -->
+  <script>
+    window.__WIDGET_DEV_CONFIG__ = {
+      widgetId: '00000000-0000-0000-0000-000000000001',
+      apiBase: 'http://localhost:8000',
+    };
+  </script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

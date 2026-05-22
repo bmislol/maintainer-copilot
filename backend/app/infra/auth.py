@@ -23,7 +23,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin
 from fastapi_users.authentication import AuthenticationBackend, BearerTransport, JWTStrategy
 from fastapi_users.db import SQLAlchemyUserDatabase
@@ -94,3 +94,62 @@ fastapi_users = FastAPIUsers[User, uuid.UUID](get_user_manager, [auth_backend])
 
 current_active_user = fastapi_users.current_user(active=True)
 current_active_superuser = fastapi_users.current_user(active=True, superuser=True)
+
+# ---------------------------------------------------------------------------
+# Widget auth — widget_id query param (Phase 4.5)
+# ---------------------------------------------------------------------------
+
+_WIDGET_SYSTEM_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+async def get_widget_user(
+    widget_id: str | None = Query(default=None),
+) -> User:
+    """Validate widget_id and return a system-user stub.
+
+    Phase 4.5: validates UUID format only.
+    Phase 4.6: will look up the widget's owning user from the widgets table.
+    """
+    if not widget_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="widget_id required"
+        )
+    try:
+        uuid.UUID(widget_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="invalid widget_id"
+        ) from None
+    return User(
+        id=_WIDGET_SYSTEM_USER_ID,
+        email="widget@system.local",
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
+        hashed_password="",
+    )
+
+
+async def get_current_user_or_widget(
+    request: Request,
+    widget_id: str | None = Query(default=None),
+    user_manager: UserManager = Depends(get_user_manager),
+) -> User:
+    """Accept either a Bearer JWT or a widget_id query param.
+
+    Tries JWT first (authenticated Streamlit / API sessions).
+    Falls back to widget_id (embedded widget sessions).
+    Raises 403 if neither is present or valid.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ")
+        strategy = get_jwt_strategy(request)
+        try:
+            user = await strategy.read_token(token, user_manager)
+            if user and user.is_active:
+                return user
+        except Exception:
+            pass  # fall through to widget_id path
+
+    return await get_widget_user(widget_id)
