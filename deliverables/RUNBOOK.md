@@ -208,16 +208,139 @@ uv run pytest        # default skips @pytest.mark.eval
 
 ## 6. Demo Flow (Friday)
 
-10-minute walkthrough. Filled by Phase 5.3.
+### 6.1 Pre-demo setup (do before the presentation)
 
-1. Open Streamlit admin, log in as the admin user.
-2. Show the chat: classify, NER, summarize, RAG answer with cited chunks.
-3. Show cross-conversation memory recall (write memory in conversation A; recall it in conversation B).
-4. Open Langfuse, walk through the trace tree for the most recent conversation, including one error path.
-5. Open `http://localhost:8080` (the allowed `demo/host/` page); show the widget appearing in the corner; send a message.
-6. Open the second host page on a disallowed origin; show the browser blocking the embed via `frame-ancestors` (open the dev tools console and point to the blocked-by-CSP error).
-7. Show CI green on `main` with both eval gates passing.
-8. Show the redaction test passing (a fake API key never appears unredacted in logs, traces, or memory).
+Run these four steps in order. Steps 2 and 3 are idempotent — safe to re-run.
+
+**Step 1 — Start the stack:**
+
+```bash
+docker compose up -d
+```
+
+Wait ~30 seconds for Langfuse to become ready. Verify:
+
+```bash
+docker compose ps
+curl -s http://localhost:8000/healthz        # {"status":"ok"}
+curl -s http://localhost:8080/               # HTML — Acme OSS Docs
+curl -s http://localhost:8501/_stcore/health # ok
+```
+
+**Step 2 — Bootstrap the admin user** (skip if already done):
+
+```bash
+export DATABASE_URL="postgresql+asyncpg://copilot:copilot-dev-password@localhost:5432/copilot"
+export BOOTSTRAP_EMAIL="admin@maintainer-copilot.dev"
+export BOOTSTRAP_PASSWORD="change-me-before-demo"
+
+cd backend
+uv run python -m app.entrypoints.bootstrap_admin
+```
+
+Expected output: `Admin user created: admin@maintainer-copilot.dev`
+
+**Step 3 — Bootstrap the demo widget** (skip if already done):
+
+```bash
+export DATABASE_URL="postgresql+asyncpg://copilot:copilot-dev-password@localhost:5432/copilot"
+
+cd backend
+uv run python -m scripts.bootstrap_widget
+```
+
+Expected output:
+```
+Demo widget created: 00000000-0000-0000-0001-000000000001
+  name:            Demo Widget
+  owner:           admin@maintainer-copilot.dev
+  allowed_origins: ['http://localhost:8080']
+```
+
+The demo widget UUID `00000000-0000-0000-0001-000000000001` is hardcoded in both the script and `demo/host/public/index.html` — no manual copy-paste required.
+
+**Step 4 — Rebuild the demo host** (only needed after code changes):
+
+```bash
+docker compose build host && docker compose up -d host
+```
+
+Then open `http://localhost:8080` — the 🤖 bubble should appear in the bottom-right corner.
+
+---
+
+### 6.2 10-minute walkthrough
+
+**1. Streamlit admin login**
+- Open `http://localhost:8501`
+- Log in: `admin@maintainer-copilot.dev` / `change-me-before-demo`
+- Show the sidebar: email display, Logout button, four nav pages
+
+**2. Chat — tool-calling demo**
+- Navigate to **Chat** page
+- Send: _"Classify this issue: 'np.array crashes with float16 dtype on ARM'"_
+- Point out: classification (bug), NER extraction (function name, dtype), RAG context chunks cited
+- Show `Conversation: <uuid>` caption below the response
+- Open Langfuse (`http://localhost:3001`) — find the trace; walk through the tool call spans
+
+**3. Memory — cross-conversation recall**
+- In conversation A (current), send:
+  _"Remember: the CI gate requires macro_f1 ≥ 0.90 before any merge"_
+  (Claude calls `write_memory`)
+- Click **New Conversation** — session B starts
+- Send: _"What quality threshold must pass before code is merged?"_
+- Claude recalls the stored fact — point to the pgvector similarity match
+- Navigate to **Memory Inspector** — show the episodic entry with `created_at`
+
+**4. Widget Config page**
+- Navigate to **Widget Configuration**
+- Show the form: name, theme, greeting, enabled_tools, allowed_origins
+- Show the embed snippet that appears after creation/update
+- Explain: `allowed_origins` drives both CORS and `frame-ancestors` CSP
+
+**5. Demo host — widget loads (ALLOWED origin)**
+- Open `http://localhost:8080` in a browser
+- The 🤖 bubble appears in the bottom-right corner
+- Click the bubble — panel opens with "Maintainer's Copilot" header and greeting
+- Type "hello" → real LLM response streams in
+- In browser DevTools → Network tab: show `loader.js` → `widget.js` → `/chat/send?widget_id=…`
+- In DevTools → Response headers for `widget.js`:
+  ```
+  content-security-policy: frame-ancestors 'self' http://localhost:8080
+  ```
+
+**6. Blocked origin demo (CSP violation)**
+- Open `http://localhost:8081` (the widget nginx container — NOT in allowed_origins)
+- Open DevTools → Console
+- Show the CSP violation:
+  ```
+  Refused to frame 'http://localhost:8000' because an ancestor violates
+  the following Content Security Policy directive: "frame-ancestors 'self'
+  http://localhost:8080".
+  ```
+- The bubble does NOT appear — the embed is blocked at the browser level
+
+**7. CI green + eval gates**
+- Show GitHub Actions for the `main` branch — all checks green
+- Open `backend/eval_thresholds.yaml` — point to `classification.macro_f1: 0.90` and `rag.hit_at_5: 0.8583`
+- These are hard gates: if a PR makes the model worse, CI fails before merge
+
+**8. Redaction demo**
+- Run: `docker compose exec api pytest tests/test_redaction.py -v`
+- Show all assertions pass — API keys, emails, tokens are `[REDACTED]` in logs and traces
+
+---
+
+### 6.3 Expected URLs at demo time
+
+| Service | URL |
+|---|---|
+| API | http://localhost:8000 |
+| Streamlit admin | http://localhost:8501 |
+| Demo host (allowed) | http://localhost:8080 |
+| Widget nginx (blocked) | http://localhost:8081 |
+| Langfuse traces | http://localhost:3001 |
+| MinIO console | http://localhost:9001 |
 
 ## 7. Common Issues
 

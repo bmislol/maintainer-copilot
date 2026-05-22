@@ -1,13 +1,54 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Acme Docs (fake host site)</title>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acme OSS Docs — Demo Host</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 48px auto; padding: 0 24px; color: #1f2937; }
+    h1 { font-size: 2rem; margin-bottom: 0.25em; }
+    .badge { display: inline-block; background: #dbeafe; color: #1e40af; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle; }
+    pre { background: #f3f4f6; padding: 16px; border-radius: 6px; overflow-x: auto; }
+    code { font-family: monospace; font-size: 0.9em; }
+    hr { border: none; border-top: 1px solid #e5e7eb; margin: 32px 0; }
+    .note { color: #6b7280; font-size: 0.875rem; }
+  </style>
 </head>
 <body>
-  <h1>Acme Docs</h1>
-  <p>This page pretends to be a third-party docs site embedding the Maintainer's Copilot widget.</p>
-  <p>Real embed snippet lands in Phase 4.6:</p>
-  <pre><code>&lt;script src="http://localhost:8000/widget.js" data-widget-id="..."&gt;&lt;/script&gt;</code></pre>
+  <h1>Acme OSS Docs <span class="badge">Demo Host</span></h1>
+  <p>
+    This page simulates a third-party documentation site that has embedded the
+    <strong>Maintainer's Copilot</strong> widget. The chat bubble in the bottom-right
+    corner is loaded from the api at <code>http://localhost:8000</code>.
+  </p>
+  <p class="note">
+    This host runs on <code>http://localhost:8080</code>. For the widget to load,
+    <code>http://localhost:8080</code> must be in the widget's <em>allowed_origins</em>
+    list (set in the Streamlit admin → Widget Configuration page).
+    If the origin is not allowed, the browser will block the embed and you will see
+    a <code>Content-Security-Policy</code> violation in the console.
+  </p>
+
+  <hr>
+
+  <h2>Sample Documentation</h2>
+  <p>Installation:</p>
+  <pre><code>pip install acme-library</code></pre>
+  <p>Quick start:</p>
+  <pre><code>from acme import Client
+client = Client(api_key="...")
+result = client.run(query="hello world")
+</code></pre>
+
+  <!--
+    Widget embed — loader reads data-widget-id and injects widget.js from the api.
+    UUID is the fixed demo widget created by backend/scripts/bootstrap_widget.py.
+    See RUNBOOK.md §6 for the step-by-step demo setup.
+  -->
+  <script
+    src="http://localhost:8000/loader.js"
+    data-widget-id="00000000-0000-0000-0001-000000000001"
+    data-api-base="http://localhost:8000">
+  </script>
 </body>
 </html>

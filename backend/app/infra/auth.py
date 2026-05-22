@@ -99,46 +99,47 @@ current_active_superuser = fastapi_users.current_user(active=True, superuser=Tru
 # Widget auth — widget_id query param (Phase 4.5)
 # ---------------------------------------------------------------------------
 
-_WIDGET_SYSTEM_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-
 
 async def get_widget_user(
     widget_id: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_async_session),
 ) -> User:
-    """Validate widget_id and return a system-user stub.
+    """Validate widget_id against the widgets table and return the widget's owner.
 
-    Phase 4.5: validates UUID format only.
-    Phase 4.6: will look up the widget's owning user from the widgets table.
+    Phase 4.6: real DB lookup — widget must exist and have an active owner.
     """
     if not widget_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="widget_id required"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="widget_id required")
     try:
-        uuid.UUID(widget_id)
+        wid = uuid.UUID(widget_id)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="invalid widget_id"
         ) from None
-    return User(
-        id=_WIDGET_SYSTEM_USER_ID,
-        email="widget@system.local",
-        is_active=True,
-        is_superuser=False,
-        is_verified=True,
-        hashed_password="",
-    )
+
+    from app.repositories.widgets import get_widget  # local import avoids circular
+
+    widget = await get_widget(session, wid)
+    if not widget:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="widget not found")
+    if widget.owner_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="widget has no owner")
+    owner = await session.get(User, widget.owner_id)
+    if not owner or not owner.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="widget owner inactive")
+    return owner
 
 
 async def get_current_user_or_widget(
     request: Request,
     widget_id: str | None = Query(default=None),
     user_manager: UserManager = Depends(get_user_manager),
+    session: AsyncSession = Depends(get_async_session),
 ) -> User:
     """Accept either a Bearer JWT or a widget_id query param.
 
     Tries JWT first (authenticated Streamlit / API sessions).
-    Falls back to widget_id (embedded widget sessions).
+    Falls back to widget_id (embedded widget sessions, DB lookup — Phase 4.6).
     Raises 403 if neither is present or valid.
     """
     auth_header = request.headers.get("Authorization", "")
@@ -152,4 +153,4 @@ async def get_current_user_or_widget(
         except Exception:
             pass  # fall through to widget_id path
 
-    return await get_widget_user(widget_id)
+    return await get_widget_user(widget_id, session)
