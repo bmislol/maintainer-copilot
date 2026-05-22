@@ -309,9 +309,31 @@ A redaction layer in `app/infra/redaction.py` will run before any log line, trac
 
 ### 13.1 Streamlit Admin (`frontend-admin/`)
 
-Internal-tool surface for the maintainer. Runs on `localhost:8501`. Contains: login form, full chat interface with streamed responses, memory inspector (read-only view of the user's long-term entries), and the admin-only widget configuration page that generates embed snippets.
+Internal-tool surface for the maintainer. Runs on `localhost:8501` (host-side,
+not in Docker). Install with `pip install -r requirements.txt`, run with
+`streamlit run app.py`.
 
-Authenticates against the same `api` via JWT.
+**Pages:**
+- **Home (`app.py`)** — login form; email + password → `POST /auth/jwt/login`;
+  JWT stored in `st.session_state`. After login shows sidebar with email and
+  Logout button (present on all pages via `utils/auth_guard.py`).
+- **Chat (`pages/chat.py`)** — `st.chat_input` + `st.write_stream()` over the
+  SSE response from `POST /chat/send`. Conversation ID generated client-side on
+  the first turn and displayed with `st.caption`. New Conversation button resets
+  state.
+- **Memory Inspector (`pages/memory.py`)** — read-only list of the user's
+  long-term memory entries from `GET /memory/entries`, rendered as expandable
+  cards showing content, type, timestamp, and ID.
+- **Widget Config (`pages/widget_config.py`)** — placeholder; full
+  implementation in Phase 4.6.
+
+**SSE streaming:** `send_message_stream()` in `utils/api_client.py` uses
+`requests` with `stream=True` and parses `data: <chunk>` lines manually.
+`st.write_stream()` (Streamlit ≥1.31) consumes the generator and renders
+output incrementally.
+
+**New API endpoint:** `GET /memory/entries` — returns the authenticated user's
+long-term memory entries newest-first. Implemented in `app/api/memory.py`.
 
 ### 13.2 React Widget (`frontend-widget/`)
 
